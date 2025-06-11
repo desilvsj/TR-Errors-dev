@@ -137,4 +137,4 @@ python findRepeatsV5.py <reads_R1.fastq(.gz)> <reads_R2.fastq(.gz)>
 
 **Author**: Janesh De Silva
 **License**: MIT
-**Contact**: [your.email@example.com](mailto:your.email@example.com)
+**Contact**: [janeshdsilva@gmail.com](mailto:janeshdsilva@gmail.com)
