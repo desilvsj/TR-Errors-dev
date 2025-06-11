@@ -111,14 +111,6 @@ python findRepeatsV5.py <reads_R1.fastq(.gz)> <reads_R2.fastq(.gz)>
   rf.process_all_pairs(...)
   print(f"Total runtime: {perf_counter() - t0:.1f}s")
   ```
-* **Intermediate logs**: inside loop:
-
-  ```python
-  if i % report_every == 0:
-      now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-      elapsed = perf_counter() - start
-      print(f"[{now}] processed {i:,} pairs — elapsed {elapsed:.1f}s")
-  ```
 * **With `tqdm`**: replace loop with:
 
   ```python
