@@ -7,7 +7,14 @@ import numpy as np
 
 def phreds_to_ascii(phreds):
     shift = 33
-    return ''.join(chr(min(q, 42) + shift) for q in phreds)
+    chars = []
+    for q in phreds:
+        # q can be numpy type, ensure python int
+        val = int(q)
+        # cap within 0..42 before converting to ASCII
+        val = max(0, min(val, 42))
+        chars.append(chr(val + shift))
+    return ''.join(chars)
 
 
 def main():
