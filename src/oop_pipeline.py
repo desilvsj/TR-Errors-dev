@@ -84,14 +84,14 @@ class ConsensusMatrix:
         cycles = positions // self.d
         self._ensure_cycles(int(cycles.max()))
 
-        for b in range(4):
-            mask = idx == b
-            if not mask.any():
-                continue
-            c = cycles[mask]
-            col = cols[mask]
-            w = q[mask]
-            np.add.at(self.mat[b], (col, c), w)
+        valid = idx < 4
+        if not np.any(valid):
+            return
+        np.add.at(
+            self.mat,
+            (idx[valid], cols[valid], cycles[valid]),
+            q[valid],
+        )
 
     def to_consensus(self) -> Tuple[str, List[int], np.ndarray, int]:
         sum4 = self.mat.sum(axis=2)
@@ -126,12 +126,13 @@ class RepeatDetector:
     def find_repeat_distance(self, seq: str) -> int:
         k = self.k
         max_e = self.max_errors
-        anchor = seq[0:k]
-        max_range = len(seq) - k
-        for i in range(max_range):
-            cand = seq[k + i : 2 * k + i]
-            if self._compare(anchor, cand, max_e):
-                return k + i
+        arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
+        anchor = arr[:k]
+        windows = np.lib.stride_tricks.sliding_window_view(arr, k)
+        mism = (windows != anchor).sum(axis=1)
+        hits = np.flatnonzero(mism <= max_e)
+        if hits.size:
+            return int(k + hits[0])
         raise NoRepeats
 
 
@@ -146,16 +147,12 @@ class OrientationDecider:
     def _score_orientation(self, cons_idx: np.ndarray, seq: str, qual: str, d: int):
         idx = encode_seq(seq)
         phred = encode_qual(qual)
-        positions = np.arange(len(idx), dtype=np.int64)
-        best_score = -1
-        best_phi = 0
-        for phi in range(d):
-            cols = (phi + positions) % d
-            mask = idx == cons_idx[cols]
-            score = int(phred[mask].sum()) if mask.any() else 0
-            if score > best_score:
-                best_score, best_phi = score, phi
-        return best_score, best_phi
+        pos = np.arange(len(idx))
+        cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+        matches = (idx[np.newaxis, :] == cons_idx[cols])
+        scores = (phred[np.newaxis, :] * matches).sum(axis=1)
+        phi = int(np.argmax(scores))
+        return int(scores[phi]), phi
 
     def decide_orientation(self, stream: FastqStream, sample_size: int = 1000) -> str:
         pairs = stream.sample(sample_size)
@@ -189,17 +186,13 @@ class OrientationDecider:
 # ----------------------- PhaseAligner ---------------------------
 
 class PhaseAligner:
-    def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> int:
-        positions = np.arange(len(read_idx), dtype=np.int64)
-        best_score = -1
-        best_phi = 0
-        for phi in range(d):
-            cols = (phi + positions) % d
-            mask = read_idx == cons_idx[cols]
-            score = int(read_q[mask].sum()) if mask.any() else 0
-            if score > best_score:
-                best_score, best_phi = score, phi
-        return best_phi
+    def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> Tuple[int, int]:
+        pos = np.arange(len(read_idx))
+        cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+        matches = (read_idx[np.newaxis, :] == cons_idx[cols])
+        scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
+        phi = int(np.argmax(scores))
+        return phi, int(scores[phi])
 
     def merge(self, matrix: ConsensusMatrix, seq: str, qual: str, shift: int):
         matrix.update(seq, qual, shift=shift)
@@ -248,7 +241,7 @@ class RepeatPhasingPipeline:
                 qual2 = qual2[::-1]
             read_idx = encode_seq(seq2)
             read_q = encode_qual(qual2)
-            phi = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
+            phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
             self.aligner.merge(cm, seq2, qual2, phi)
             final_seq, final_q, _, _ = cm.to_consensus()
             elapsed = perf_counter() - start
