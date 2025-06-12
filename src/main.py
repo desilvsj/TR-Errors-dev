@@ -2,6 +2,7 @@ import sys
 import argparse
 from time import perf_counter
 from oop_pipeline import RepeatPhasingPipeline
+import numpy as np
 
 
 def phreds_to_ascii(phreds):
@@ -25,8 +26,12 @@ def main():
     count = 0
     for result in pipeline.run():
         count += 1
+        mat_str = np.array2string(result.matrix, separator=",", max_line_width=1000000)
         qual_str = phreds_to_ascii(result.qualities)
-        line = f"{result.phase_shift}\t{result.cycles}\t{result.consensus}\t{qual_str}"
+        line = (
+            f"{result.read_id}\t{result.phase_shift}\t{result.consensus_len}\t"
+            f"{result.elapsed:.6f}\t{result.consensus}\t{qual_str}\t{mat_str}"
+        )
         print(line, file=out_fh)
 
     if args.output:

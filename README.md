@@ -45,10 +45,10 @@ python findRepeatsV5.py <reads_R1.fastq(.gz)> <reads_R2.fastq(.gz)>
 python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-size N]
 ```
 
-The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair
-containing the phase shift, cycle count, consensus sequence and quality string. If `-o/--output` is omitted,
-results are printed to the console. When finished a summary reports total runtime and the processing rate in
-pairs per second.
+The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair.
+Each line contains the read ID, the inferred phase shift, the consensus length, the time taken to process the
+pair and the 3‑D consensus matrix as a flattened list. If `-o/--output` is omitted, results are printed to the
+console. When finished a summary reports total runtime and the processing rate in pairs per second.
 
 ## Configuration
 
