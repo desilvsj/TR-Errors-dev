@@ -82,8 +82,8 @@ class ConsensusMatrix:
         positions = shift + np.arange(len(idx), dtype=np.int64)
         cols = positions % self.d
         cycles = positions // self.d
-        max_cyc = int(cycles.max())
-        self._ensure_cycles(max_cyc)
+        self._ensure_cycles(int(cycles.max()))
+
         for b in range(4):
             mask = idx == b
             if not mask.any():
@@ -91,8 +91,7 @@ class ConsensusMatrix:
             c = cycles[mask]
             col = cols[mask]
             w = q[mask]
-            for cyc, col_id, weight in zip(c, col, w):
-                self.mat[b, col_id, cyc] += int(weight)
+            np.add.at(self.mat[b], (col, c), w)
 
     def to_consensus(self) -> Tuple[str, List[int], np.ndarray, int]:
         sum4 = self.mat.sum(axis=2)

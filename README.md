@@ -14,8 +14,8 @@ This module exposes small classes such as `FastqStream`, `ConsensusMatrix` and
 * **Vectorized consensus**: uses NumPy to build and merge 4×d quality-weighted matrices for speed
 * **Flexible repeat detection**: sliding k-mer search (`find_repeat_dist`) with bounded mismatches
 * **Streaming processing**: handles millions of reads via Biopython’s `SeqIO.parse`
-* **Progress & timing hooks**: built-in `--progress` flag prints rate every second;
-  use `--quiet` to suppress per-read output
+* **Progress & timing hooks**: optional `--progress` shows a tqdm progress bar with
+  current rate; use `--quiet` to suppress per-read output
 
 ## Requirements
 
@@ -47,10 +47,10 @@ python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-si
 ```
 
 The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair unless
-`--quiet` is given. Each line contains the read ID, the inferred phase shift, the consensus length, the time taken to
-process the pair and the 3‑D consensus matrix as a flattened list. When `--progress` is enabled, the program prints a
-running count and processing rate to stderr every second. If `-o/--output` is omitted, results are printed to the
-console. When finished a summary reports total runtime and the processing rate in pairs per second.
+`--quiet` is given. Each line contains the read ID, the inferred phase shift, the consensus length, the processing time,
+the consensus sequence and its quality string. When `--progress` is enabled a `tqdm` progress bar shows the current
+processing rate. If `-o/--output` is omitted, results are printed to the console. When finished a summary reports total
+runtime and the processing rate in pairs per second.
 
 ## Configuration
 

@@ -2,7 +2,7 @@ import sys
 import argparse
 from time import perf_counter
 from oop_pipeline import RepeatPhasingPipeline
-import numpy as np
+from tqdm import tqdm
 
 
 def phreds_to_ascii(phreds):
@@ -36,26 +36,23 @@ def main():
         out_fh = open(args.output, "w") if args.output else sys.stdout
 
     t0 = perf_counter()
-    last_report = t0
     count = 0
     total_pair_time = 0.0
+    progress = tqdm(disable=not args.progress, unit="pairs", leave=False)
+
     for result in pipeline.run():
         count += 1
         total_pair_time += result.elapsed
         if out_fh:
-            mat_str = np.array2string(result.matrix, separator=",", max_line_width=1000000)
             qual_str = phreds_to_ascii(result.qualities)
             line = (
                 f"{result.read_id}\t{result.phase_shift}\t{result.consensus_len}\t"
-                f"{result.elapsed:.6f}\t{result.consensus}\t{qual_str}\t{mat_str}"
+                f"{result.elapsed:.6f}\t{result.consensus}\t{qual_str}"
             )
             print(line, file=out_fh)
 
-        now = perf_counter()
-        if args.progress and (now - last_report) >= 1.0:
-            rate = count / (now - t0)
-            print(f"Processed {count} pairs \u2014 {rate:.1f} pairs/s", file=sys.stderr)
-            last_report = now
+        progress.update(1)
+    progress.close()
 
     if out_fh and out_fh is not sys.stdout:
         out_fh.close()
