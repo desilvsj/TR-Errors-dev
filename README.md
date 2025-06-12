@@ -4,6 +4,10 @@
 
 `findRepeatsV5.py` implements a high-throughput pipeline for detecting and phasing tandem repeats in paired-end FastQ data (including `.gz`). It builds a per-cycle consensus from the long RCA reads (R1), determines global orientation of the partner reads (R2), and merges both strands into a final high-quality consensus.
 
+An object oriented refactor of this logic is available in `src/oop_pipeline.py`.
+This module exposes small classes such as `FastqStream`, `ConsensusMatrix` and
+`RepeatPhasingPipeline` for easier extension and testing.
+
 ## Features
 
 * **Automatic orientation**: samples the first N read-pairs to decide if R2 needs reverse-complementing
