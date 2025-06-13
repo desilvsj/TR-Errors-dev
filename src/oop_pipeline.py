@@ -4,21 +4,21 @@ from dataclasses import dataclass
 from typing import Iterator, Tuple, List
 from time import perf_counter
 import numpy as np
-from numba import njit, uint8, uint64
+from numba import njit
 from Bio import SeqIO
 from Bio.Seq import Seq
 
 
 @njit
-def myers_dist(text: uint8[:], PM: uint64[:], pattern_length: int, max_errors: int) -> int:
+def myers_dist(text: np.ndarray, PM: np.ndarray, pattern_length: int, max_errors: int) -> int:
     """Return index of first match within `max_errors` edits using Myers's algorithm."""
     m = pattern_length
-    Pv = uint64(-1)
-    Mv = uint64(0)
+    Pv = np.uint64(-1)
+    Mv = np.uint64(0)
     score = m
-    for i in range(len(text)):
-        b = text[i]
-        Eq = PM[b] if b < 4 else uint64(0)
+    for i in range(text.shape[0]):
+        base = text[i]
+        Eq = PM[base] if 0 <= base < 4 else np.uint64(0)
         Xv = Eq | Mv
         Xh = (((Eq & Pv) + Pv) ^ Pv) | Eq
         Ph = Mv | ~(Xh | Pv)
@@ -56,23 +56,6 @@ def encode_seq(seq: str) -> np.ndarray:
 
 def encode_qual(qual: str) -> np.ndarray:
     return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int)
-
-
-# Cache 64-bit pattern masks so each distinct pattern is processed only once
-PATTERN_CACHE = {}
-
-def build_pattern_mask(pattern: bytes) -> np.ndarray:
-    cached = PATTERN_CACHE.get(pattern)
-    if cached is not None:
-        return cached
-    pm = [0, 0, 0, 0]
-    for j, b in enumerate(pattern):
-        idx = BASE2IDX[b]
-        if idx < 4:
-            pm[idx] |= 1 << j
-    arr = np.array(pm, dtype=np.uint64)
-    PATTERN_CACHE[pattern] = arr
-    return arr
 
 
 # ----------------------- FastqStream -----------------------------
@@ -169,12 +152,17 @@ class RepeatDetector:
     def find_repeat_distance(self, seq: str) -> int:
         k = self.k
         max_e = self.max_errors
-        pattern_bytes = seq[:k].encode("ascii")
-        text_idx = encode_seq(seq[k:]).astype(np.uint8)
+        arr = encode_seq(seq)
+        pattern = arr[:k]
+        text = arr[k:]
 
-        PM = build_pattern_mask(pattern_bytes)
+        PM = np.zeros(4, dtype=np.uint64)
+        for j in range(k):
+            b = pattern[j]
+            if b < 4:
+                PM[b] |= np.uint64(1) << j
 
-        idx = myers_dist(text_idx, PM, k, max_e)
+        idx = myers_dist(text, PM, k, max_e)
         if idx >= 0:
             return k + idx
         raise NoRepeats
