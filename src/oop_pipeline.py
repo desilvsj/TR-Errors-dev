@@ -4,36 +4,8 @@ from dataclasses import dataclass
 from typing import Iterator, Tuple, List
 from time import perf_counter
 import numpy as np
-from numba import njit
 from Bio import SeqIO
 from Bio.Seq import Seq
-
-
-@njit
-def myers_dist(text: np.ndarray, PM: np.ndarray, pattern_length: int, max_errors: int) -> int:
-    """Return index of first match within `max_errors` edits using Myers's algorithm."""
-    m = pattern_length
-    Pv = np.uint64(-1)
-    Mv = np.uint64(0)
-    score = m
-    for i in range(text.shape[0]):
-        base = text[i]
-        Eq = PM[base] if 0 <= base < 4 else np.uint64(0)
-        Xv = Eq | Mv
-        Xh = (((Eq & Pv) + Pv) ^ Pv) | Eq
-        Ph = Mv | ~(Xh | Pv)
-        Mh = Pv & Xh
-        if (Ph >> (m - 1)) & 1:
-            score += 1
-        elif (Mh >> (m - 1)) & 1:
-            score -= 1
-        if score <= max_errors:
-            return i
-        Ph <<= 1
-        Mh <<= 1
-        Pv = Mh | ~(Xv | Ph)
-        Mv = Ph & Xv
-    return -1
 
 
 # ----------------------- Encoding helpers -----------------------
@@ -152,19 +124,13 @@ class RepeatDetector:
     def find_repeat_distance(self, seq: str) -> int:
         k = self.k
         max_e = self.max_errors
-        arr = encode_seq(seq)
-        pattern = arr[:k]
-        text = arr[k:]
-
-        PM = np.zeros(4, dtype=np.uint64)
-        for j in range(k):
-            b = pattern[j]
-            if b < 4:
-                PM[b] |= np.uint64(1) << j
-
-        idx = myers_dist(text, PM, k, max_e)
-        if idx >= 0:
-            return k + idx
+        arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
+        anchor = arr[:k]
+        windows = np.lib.stride_tricks.sliding_window_view(arr, k)
+        mism = (windows != anchor).sum(axis=1)
+        hits = np.flatnonzero(mism <= max_e)
+        if hits.size:
+            return int(k + hits[0])
         raise NoRepeats
 
 
