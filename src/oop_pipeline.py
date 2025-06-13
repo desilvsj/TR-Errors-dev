@@ -203,9 +203,6 @@ class PhasingResult:
     read_id: str
     phase_shift: int
     consensus_len: int
-    consensus: str
-    qualities: List[int]
-    matrix: np.ndarray
     elapsed: float
 
 
@@ -229,8 +226,7 @@ class RepeatPhasingPipeline:
             qual1 = "".join(chr(q + 33) for q in r1.letter_annotations["phred_quality"])
             cm = ConsensusMatrix(d)
             cm.update(seq1, qual1)
-            cons_seq, _, _, _ = cm.to_consensus()
-            cons_idx = encode_seq(cons_seq)
+            cons_idx = np.argmax(cm.quality_matrix, axis=0)
 
             seq2 = str(r2.seq)
             qual2 = "".join(chr(q + 33) for q in r2.letter_annotations["phred_quality"])
@@ -241,15 +237,13 @@ class RepeatPhasingPipeline:
             read_q = encode_qual(qual2)
             phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
             self.aligner.merge(cm, seq2, qual2, phi)
-            final_seq, final_q, _, _ = cm.to_consensus()
             elapsed = perf_counter() - start
-            yield PhasingResult(
+            result = PhasingResult(
                 read_id=r1.id,
                 phase_shift=phi,
                 consensus_len=d,
-                consensus=final_seq,
-                qualities=final_q,
-                matrix=cm.quality_matrix.copy(),
                 elapsed=elapsed,
             )
+            del cm
+            yield result
 

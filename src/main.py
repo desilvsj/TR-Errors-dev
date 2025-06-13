@@ -5,18 +5,6 @@ from oop_pipeline import RepeatPhasingPipeline
 from tqdm import tqdm
 
 
-def phreds_to_ascii(phreds):
-    shift = 33
-    chars = []
-    for q in phreds:
-        # q can be numpy type, ensure python int
-        val = int(q)
-        # cap within 0..42 before converting to ASCII
-        val = max(0, min(val, 42))
-        chars.append(chr(val + shift))
-    return ''.join(chars)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Run OOP repeat phasing pipeline")
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
@@ -44,10 +32,9 @@ def main():
         count += 1
         total_pair_time += result.elapsed
         if out_fh:
-            qual_str = phreds_to_ascii(result.qualities)
             line = (
                 f"{result.read_id}\t{result.phase_shift}\t{result.consensus_len}\t"
-                f"{result.elapsed:.6f}\t{result.consensus}\t{qual_str}"
+                f"{result.elapsed:.6f}"
             )
             print(line, file=out_fh)
 
