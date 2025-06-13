@@ -3,7 +3,6 @@ import gzip
 from dataclasses import dataclass
 from typing import Iterator, Tuple, List
 from time import perf_counter
-
 import numpy as np
 from Bio import SeqIO
 from Bio.Seq import Seq

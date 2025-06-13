@@ -1,3 +1,4 @@
 /reads/
 /local_archive/
 output.*
+*pyc
