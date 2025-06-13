@@ -64,42 +64,41 @@ class FastqStream:
 # ----------------------- ConsensusMatrix ------------------------
 
 class ConsensusMatrix:
-    """Maintain a 3-D base/quality matrix for consensus building."""
+    """Quality-weighted consensus matrix with per-position coverage."""
 
     def __init__(self, d: int):
         self.d = d
-        self.mat = np.zeros((4, d, 1), dtype=int)
-
-    def _ensure_cycles(self, cycle: int):
-        if cycle >= self.mat.shape[2]:
-            pad = cycle + 1 - self.mat.shape[2]
-            self.mat = np.pad(self.mat, ((0, 0), (0, 0), (0, pad)))
+        # Aggregate quality for each base (A,C,G,T) at each position 0..d-1
+        self.quality_matrix = np.zeros((4, d), dtype=int)
+        # Number of bases contributing to each position
+        self.coverage_vector = np.zeros(d, dtype=int)
 
     def update(self, seq: str, qual: str, shift: int = 0):
         idx = encode_seq(seq)
         q = encode_qual(qual)
         positions = shift + np.arange(len(idx), dtype=np.int64)
         cols = positions % self.d
-        cycles = positions // self.d
-        self._ensure_cycles(int(cycles.max()))
 
         valid = idx < 4
         if not np.any(valid):
             return
-        np.add.at(
-            self.mat,
-            (idx[valid], cols[valid], cycles[valid]),
-            q[valid],
-        )
 
-    def to_consensus(self) -> Tuple[str, List[int], np.ndarray, int]:
-        sum4 = self.mat.sum(axis=2)
+        np.add.at(self.quality_matrix, (idx[valid], cols[valid]), q[valid])
+        np.add.at(self.coverage_vector, cols[valid], 1)
+
+    def to_consensus(self) -> Tuple[str, List[int], np.ndarray, np.ndarray]:
+        sum4 = self.quality_matrix
         best_idx = np.argmax(sum4, axis=0)
         total = np.sum(sum4, axis=0)
         best = sum4[best_idx, np.arange(self.d)]
         cons_q = best - (total - best)
         cons_seq = "".join(IDX2BASE[best_idx].tolist())
-        return cons_seq, cons_q.tolist(), self.mat, self.mat.shape[2]
+        return (
+            cons_seq,
+            cons_q.tolist(),
+            self.quality_matrix,
+            self.coverage_vector,
+        )
 
 
 # ----------------------- RepeatDetector -------------------------
@@ -250,7 +249,7 @@ class RepeatPhasingPipeline:
                 consensus_len=d,
                 consensus=final_seq,
                 qualities=final_q,
-                matrix=cm.mat.copy(),
+                matrix=cm.quality_matrix.copy(),
                 elapsed=elapsed,
             )
 
