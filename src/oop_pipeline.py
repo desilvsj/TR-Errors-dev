@@ -3,6 +3,7 @@ import gzip
 from dataclasses import dataclass
 from typing import Iterator, Tuple, List
 from time import perf_counter
+from collections import defaultdict
 import numpy as np
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -262,12 +263,39 @@ class RepeatPhasingPipeline:
             phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
             self.aligner.merge(cm, seq2, qual2, phi)
             elapsed = perf_counter() - start
-            result = PhasingResult(
-                read_id=r1.id,
-                phase_shift=phi,
-                consensus_len=d,
+        """Yield ``PhasingResult`` objects for each processed read pair and report timing."""
+        timings = defaultdict(float)
+            pair_start = perf_counter()
+
+            t = perf_counter()
+            timings["repeat detection"] += perf_counter() - t
+
+            t = perf_counter()
+            timings["consensus build"] += perf_counter() - t
+
+            t = perf_counter()
+            cons_seq, _, _, _ = cm.to_consensus()
+            cons_idx = encode_seq(cons_seq)
+            timings["consensus extract"] += perf_counter() - t
+            t = perf_counter()
+            timings["R2 prep"] += perf_counter() - t
+
+            t = perf_counter()
+            timings["phase alignment"] += perf_counter() - t
+
+            t = perf_counter()
+            timings["merge"] += perf_counter() - t
+
+            elapsed = perf_counter() - pair_start
                 elapsed=elapsed,
             )
             del cm
             yield result
+
+        total = sum(timings.values())
+        if total:
+            print("Timing summary:")
+            for name, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
+                pct = secs / total * 100
+                print(f"  {name:16s}{secs:.3f}s ({pct:.1f}%)")
 
