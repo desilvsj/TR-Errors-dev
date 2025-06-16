@@ -10,8 +10,14 @@ def main():
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
     parser.add_argument("r2", help="R2 FASTQ (.gz accepted)")
     parser.add_argument("-o", "--output", help="Optional output file")
-    parser.add_argument("-s", "--sample-size", type=int, default=10000,
-                        help="Pairs to sample for orientation")
+    parser.add_argument("-n", "--max-reads", type=int, default=None,
+                        help="Maximum number of read pairs to process")
+    pipeline = RepeatPhasingPipeline(
+        args.r1, args.r2, sample_size=args.sample_size, max_reads=args.max_reads
+    )
+    progress = tqdm(
+        total=args.max_reads, disable=not args.progress, unit="pairs", leave=False
+    )
     parser.add_argument("--quiet", action="store_true",
                         help="Disable per-read output")
     parser.add_argument("--progress", action="store_true",

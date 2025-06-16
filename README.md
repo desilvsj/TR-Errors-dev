@@ -43,14 +43,14 @@ python findRepeatsV5.py <reads_R1.fastq(.gz)> <reads_R2.fastq(.gz)>
 ### Running the OOP pipeline
 
 ```
-python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-size N] [--quiet] [--progress]
+python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-size N] [--quiet] [--progress] [--max-reads N]
 ```
 
 The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair unless
 `--quiet` is given. Each line contains the read ID, the inferred phase shift, the consensus length and the processing time.
 When `--progress` is enabled a `tqdm` progress bar shows the current
-processing rate. If `-o/--output` is omitted, results are printed to the console. When finished a summary reports total
-runtime and the processing rate in pairs per second.
+processing rate. Use `--max-reads` to stop after a fixed number of pairs. If `-o/--output` is omitted, results are printed to the console.
+When finished a summary reports total runtime and the processing rate in pairs per second.
 
 ## Configuration
 

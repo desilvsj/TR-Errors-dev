@@ -254,7 +254,19 @@ class RepeatPhasingPipeline:
             timings["repeat detection"] += perf_counter() - t
 
             t = perf_counter()
-            qual1 = "".join(chr(q + 33) for q in r1.letter_annotations["phred_quality"])
+    def __init__(
+        self,
+        r1_path: str,
+        r2_path: str,
+        sample_size: int = 1000,
+        k: int = 40,
+        max_errors: int = 2,
+        max_reads: int | None = None,
+    ):
+        self.max_reads = max_reads
+        processed = 0
+            if self.max_reads is not None and processed >= self.max_reads:
+                break
             cm = ConsensusMatrix(d)
             cm.update(seq1, qual1)
             timings["consensus build"] += perf_counter() - t
@@ -290,6 +302,7 @@ class RepeatPhasingPipeline:
                 elapsed=elapsed,
             )
             del cm
+            processed += 1
             yield result
 
         total = sum(timings.values())
