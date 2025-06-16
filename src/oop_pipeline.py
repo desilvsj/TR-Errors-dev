@@ -84,8 +84,8 @@ class ConsensusMatrix:
         """Add a read to the matrix, optionally shifted by ``shift`` bases."""
         idx = encode_seq(seq)
         q = encode_qual(qual)
-        positions = shift + np.arange(len(idx), dtype=np.int64)
-        cols = positions % self.d
+        self.positions = shift + np.arange(len(idx), dtype=np.int64)
+        cols = self.positions % self.d
 
         valid = idx < 4
         if not np.any(valid):
@@ -93,6 +93,7 @@ class ConsensusMatrix:
 
         np.add.at(self.quality_matrix, (idx[valid], cols[valid]), q[valid])
         np.add.at(self.coverage_vector, cols[valid], 1)
+        
 
     def to_consensus(self) -> Tuple[str, List[int], np.ndarray, np.ndarray]:
         """Return consensus string, qualities, and underlying matrices."""
@@ -105,9 +106,9 @@ class ConsensusMatrix:
         # Track absolute min/max positions added to compute consensus length
         self.min_pos = 0
         self.max_pos = -1
-        if positions.size:
-            pos_start = int(positions[0])
-            pos_end = int(positions[-1])
+        if hasattr(self, "positions") and self.positions.size:
+            pos_start = int(self.positions[0])
+            pos_end = int(self.positions[-1])
             if self.max_pos < pos_end:
                 self.max_pos = pos_end
             if pos_start < self.min_pos:
@@ -354,8 +355,6 @@ class RepeatPhasingPipeline:
             del cm
             processed += 1
             yield result
-        
-        print(self.aligner.fallback_count)
 
         total = sum(timings.values())
         if total:
