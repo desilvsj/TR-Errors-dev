@@ -26,23 +26,29 @@ def encode_seq(seq: str) -> np.ndarray:
     return BASE2IDX[ascii_vals]
 
 
+    """Convert an A/C/G/T string to numeric indices used by the matrix."""
 def encode_qual(qual: str) -> np.ndarray:
+    """Turn ASCII-encoded Phred qualities into integer scores."""
     return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int)
 
 
+    """Return a 4-element mask array for Myers's algorithm, caching results."""
 # ----------------------- FastqStream -----------------------------
 
 class FastqStream:
     """Stream paired FASTQ records."""
 
     def __init__(self, r1_path: str, r2_path: str):
+        """Store file paths for later streaming."""
         self.r1_path = r1_path
         self.r2_path = r2_path
 
     def _open(self, path: str):
+        """Open plain or gzipped FASTQ files transparently."""
         return gzip.open(path, "rt") if path.endswith('.gz') else open(path, 'r')
 
     def __iter__(self) -> Iterator[Tuple[SeqIO.SeqRecord, SeqIO.SeqRecord]]:
+        """Yield pairs of R1/R2 records from the FASTQ streams."""
         with self._open(self.r1_path) as f1, self._open(self.r2_path) as f2:
             it1 = SeqIO.parse(f1, "fastq")
             it2 = SeqIO.parse(f2, "fastq")
@@ -50,6 +56,7 @@ class FastqStream:
                 yield r1, r2
 
     def sample(self, n: int) -> List[Tuple[SeqIO.SeqRecord, SeqIO.SeqRecord]]:
+        """Return the first ``n`` pairs without consuming the iterator."""
         pairs = []
         with self._open(self.r1_path) as f1, self._open(self.r2_path) as f2:
             it1 = SeqIO.parse(f1, "fastq")
@@ -67,6 +74,7 @@ class ConsensusMatrix:
     """Quality-weighted consensus matrix with per-position coverage."""
 
     def __init__(self, d: int):
+        """Initialize empty matrices for a repeat unit of length ``d``."""
         self.d = d
         # Aggregate quality for each base (A,C,G,T) at each position 0..d-1
         self.quality_matrix = np.zeros((4, d), dtype=int)
@@ -74,6 +82,7 @@ class ConsensusMatrix:
         self.coverage_vector = np.zeros(d, dtype=int)
 
     def update(self, seq: str, qual: str, shift: int = 0):
+        """Add a read to the matrix, optionally shifted by ``shift`` bases."""
         idx = encode_seq(seq)
         q = encode_qual(qual)
         positions = shift + np.arange(len(idx), dtype=np.int64)
@@ -87,6 +96,7 @@ class ConsensusMatrix:
         np.add.at(self.coverage_vector, cols[valid], 1)
 
     def to_consensus(self) -> Tuple[str, List[int], np.ndarray, np.ndarray]:
+        """Return consensus string, qualities, and underlying matrices."""
         sum4 = self.quality_matrix
         best_idx = np.argmax(sum4, axis=0)
         total = np.sum(sum4, axis=0)
@@ -108,11 +118,15 @@ class NoRepeats(Exception):
 
 
 class RepeatDetector:
+    """Find the repeat unit length using a k-mer search."""
+
     def __init__(self, k: int = 20, max_errors: int = 2):
+        """Configure search window size and allowed mismatches."""
         self.k = k
         self.max_errors = max_errors
 
     def _compare(self, a: str, b: str, errors: int) -> bool:
+        """Return ``True`` if ``a`` and ``b`` differ by at most ``errors`` bases."""
         err = 0
         for x, y in zip(a, b):
             if x != y:
@@ -122,8 +136,20 @@ class RepeatDetector:
         return True
 
     def find_repeat_distance(self, seq: str) -> int:
+        """Return the inferred repeat distance in ``seq`` using Myers's search."""
         k = self.k
         max_e = self.max_errors
+        """Store a ``RepeatDetector`` used during orientation sampling."""
+        """Score how well ``seq`` aligns at each phase against ``cons_idx``."""
+        """Return 'RC' if reverse complements score better for most samples."""
+        """Return the phase shift yielding the highest quality-weighted match."""
+        """Insert ``seq`` into ``matrix`` at the given phase shift."""
+    """Summary of phasing for a single read pair."""
+
+    """Coordinate repeat detection, orientation, and phasing for a read set."""
+
+        """Prepare pipeline components and configure algorithm parameters."""
+        """Yield ``PhasingResult`` objects for each processed read pair."""
         arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
         anchor = arr[:k]
         windows = np.lib.stride_tricks.sliding_window_view(arr, k)
