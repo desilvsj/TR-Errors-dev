@@ -22,17 +22,14 @@ IDX2BASE = np.array(list("ACGT"), dtype="<U1")
 
 
 def encode_seq(seq: str) -> np.ndarray:
+    """Convert an A/C/G/T string to numeric indices used by the matrix."""
     ascii_vals = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
     return BASE2IDX[ascii_vals]
-
-
-    """Convert an A/C/G/T string to numeric indices used by the matrix."""
+    
 def encode_qual(qual: str) -> np.ndarray:
     """Turn ASCII-encoded Phred qualities into integer scores."""
-    return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int)
+    return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int) # Return a 4-element mask array for Myers's algorithm, caching results.
 
-
-    """Return a 4-element mask array for Myers's algorithm, caching results."""
 # ----------------------- FastqStream -----------------------------
 
 class FastqStream:
@@ -139,17 +136,17 @@ class RepeatDetector:
         """Return the inferred repeat distance in ``seq`` using Myers's search."""
         k = self.k
         max_e = self.max_errors
-        """Store a ``RepeatDetector`` used during orientation sampling."""
-        """Score how well ``seq`` aligns at each phase against ``cons_idx``."""
-        """Return 'RC' if reverse complements score better for most samples."""
-        """Return the phase shift yielding the highest quality-weighted match."""
-        """Insert ``seq`` into ``matrix`` at the given phase shift."""
-    """Summary of phasing for a single read pair."""
-
-    """Coordinate repeat detection, orientation, and phasing for a read set."""
-
-        """Prepare pipeline components and configure algorithm parameters."""
-        """Yield ``PhasingResult`` objects for each processed read pair."""
+        """
+        Store a ``RepeatDetector`` used during orientation sampling.
+        Score how well ``seq`` aligns at each phase against ``cons_idx``.
+        Return 'RC' if reverse complements score better for most samples.
+        Return the phase shift yielding the highest quality-weighted match.
+        Insert ``seq`` into ``matrix`` at the given phase shift.
+        Summary of phasing for a single read pair.
+        Coordinate repeat detection, orientation, and phasing for a read set.
+        Prepare pipeline components and configure algorithm parameters.
+        Yield ``PhasingResult`` objects for each processed read pair.
+        """
         arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
         anchor = arr[:k]
         windows = np.lib.stride_tricks.sliding_window_view(arr, k)
@@ -178,7 +175,7 @@ class OrientationDecider:
         phi = int(np.argmax(scores))
         return int(scores[phi]), phi
 
-    def decide_orientation(self, stream: FastqStream, sample_size: int = 1000) -> str:
+    def decide_orientation(self, stream: FastqStream, sample_size: int = 10000) -> str:
         pairs = stream.sample(sample_size)
         forward = 0
         rc = 0
@@ -204,6 +201,7 @@ class OrientationDecider:
                 rc += 1
             else:
                 forward += 1
+        print(f"RC Count: {rc}\nForward Count: {forward}")
         return "RC" if rc > forward else "forward"
 
 

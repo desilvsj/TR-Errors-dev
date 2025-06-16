@@ -10,7 +10,7 @@ def main():
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
     parser.add_argument("r2", help="R2 FASTQ (.gz accepted)")
     parser.add_argument("-o", "--output", help="Optional output file")
-    parser.add_argument("-s", "--sample-size", type=int, default=1000,
+    parser.add_argument("-s", "--sample-size", type=int, default=10000,
                         help="Pairs to sample for orientation")
     parser.add_argument("--quiet", action="store_true",
                         help="Disable per-read output")
