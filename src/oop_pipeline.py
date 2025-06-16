@@ -240,19 +240,31 @@ class RepeatPhasingPipeline:
         self.sample_size = sample_size
 
     def run(self) -> Iterator[PhasingResult]:
+        timings = defaultdict(float)
         orientation = self.decider.decide_orientation(self.stream, self.sample_size)
         for r1, r2 in self.stream:
-            start = perf_counter()
+            pair_start = perf_counter()
+
+            t = perf_counter()
             seq1 = str(r1.seq)
             try:
                 d = self.detector.find_repeat_distance(seq1)
             except NoRepeats:
                 continue
+            timings["repeat detection"] += perf_counter() - t
+
+            t = perf_counter()
             qual1 = "".join(chr(q + 33) for q in r1.letter_annotations["phred_quality"])
             cm = ConsensusMatrix(d)
             cm.update(seq1, qual1)
-            cons_idx = np.argmax(cm.quality_matrix, axis=0)
+            timings["consensus build"] += perf_counter() - t
 
+            t = perf_counter()
+            cons_seq, _, _, _ = cm.to_consensus()
+            cons_idx = encode_seq(cons_seq)
+            timings["consensus extract"] += perf_counter() - t
+
+            t = perf_counter()
             seq2 = str(r2.seq)
             qual2 = "".join(chr(q + 33) for q in r2.letter_annotations["phred_quality"])
             if orientation == "RC":
@@ -260,33 +272,21 @@ class RepeatPhasingPipeline:
                 qual2 = qual2[::-1]
             read_idx = encode_seq(seq2)
             read_q = encode_qual(qual2)
-            phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
-            self.aligner.merge(cm, seq2, qual2, phi)
-            elapsed = perf_counter() - start
-        """Yield ``PhasingResult`` objects for each processed read pair and report timing."""
-        timings = defaultdict(float)
-            pair_start = perf_counter()
-
-            t = perf_counter()
-            timings["repeat detection"] += perf_counter() - t
-
-            t = perf_counter()
-            timings["consensus build"] += perf_counter() - t
-
-            t = perf_counter()
-            cons_seq, _, _, _ = cm.to_consensus()
-            cons_idx = encode_seq(cons_seq)
-            timings["consensus extract"] += perf_counter() - t
-            t = perf_counter()
             timings["R2 prep"] += perf_counter() - t
 
             t = perf_counter()
+            phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
             timings["phase alignment"] += perf_counter() - t
 
             t = perf_counter()
+            self.aligner.merge(cm, seq2, qual2, phi)
             timings["merge"] += perf_counter() - t
 
             elapsed = perf_counter() - pair_start
+            result = PhasingResult(
+                read_id=r1.id,
+                phase_shift=phi,
+                consensus_len=d,
                 elapsed=elapsed,
             )
             del cm
