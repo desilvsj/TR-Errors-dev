@@ -7,6 +7,7 @@ from collections import defaultdict
 import numpy as np
 from Bio import SeqIO
 from Bio.Seq import Seq
+from numba import njit
 
 
 # ----------------------- Encoding helpers -----------------------
@@ -207,6 +208,23 @@ class OrientationDecider:
 
 
 # ----------------------- PhaseAligner ---------------------------
+# @njit
+# def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 40):
+#     search_limit = len(read_idx) - window + 1
+#     for phi in range(search_limit):  # read shift (phase)
+#         mismatches = 0
+#         for i in range(window):
+#             r = read_idx[phi + i]
+#             if r > 3:
+#                 continue
+#             c = cons_idx[i % d]
+#             if r != c:
+#                 mismatches += 1
+#                 if mismatches > max_errors:
+#                     break
+#         if mismatches <= max_errors:
+#             return phi
+#     return -1
 
 class PhaseAligner:
     def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> Tuple[int, int]:
@@ -216,6 +234,26 @@ class PhaseAligner:
         scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
         phi = int(np.argmax(scores))
         return phi, int(scores[phi])
+
+    # def __init__(self):
+    #     self.fallback_count = 0
+
+    # def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int, max_errors: int = 2, window: int = 40) -> Tuple[int, int | None]:
+    #     # Attempt fast mismatch-limited scan
+    #     max_errors = 5
+    #     phi = lazy_best_shift(cons_idx, read_idx, d, max_errors, window)
+    #     if phi >= 0:
+    #         return phi, None
+
+    #     # Fallback: quality-weighted scoring
+    #     self.fallback_count += 1
+    #     pos = np.arange(len(read_idx))
+    #     cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+    #     matches = (read_idx[np.newaxis, :] == cons_idx[cols])
+    #     scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
+    #     phi = int(np.argmax(scores))
+    #     return phi, int(scores[phi])
+
 
     def merge(self, matrix: ConsensusMatrix, seq: str, qual: str, shift: int):
         matrix.update(seq, qual, shift=shift)
@@ -232,17 +270,22 @@ class PhasingResult:
 
 
 class RepeatPhasingPipeline:
-    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 40, max_errors: int = 2):
+    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 50, max_errors: int = 2, max_reads: int | None = None):
         self.stream = FastqStream(r1_path, r2_path)
         self.detector = RepeatDetector(k=k, max_errors=max_errors)
         self.decider = OrientationDecider(self.detector)
         self.aligner = PhaseAligner()
         self.sample_size = sample_size
+        self.max_reads = max_reads
 
     def run(self) -> Iterator[PhasingResult]:
         timings = defaultdict(float)
         orientation = self.decider.decide_orientation(self.stream, self.sample_size)
+        processed = 0
         for r1, r2 in self.stream:
+            if self.max_reads is not None and processed >= self.max_reads:
+                break
+
             pair_start = perf_counter()
 
             t = perf_counter()
@@ -254,19 +297,7 @@ class RepeatPhasingPipeline:
             timings["repeat detection"] += perf_counter() - t
 
             t = perf_counter()
-    def __init__(
-        self,
-        r1_path: str,
-        r2_path: str,
-        sample_size: int = 1000,
-        k: int = 40,
-        max_errors: int = 2,
-        max_reads: int | None = None,
-    ):
-        self.max_reads = max_reads
-        processed = 0
-            if self.max_reads is not None and processed >= self.max_reads:
-                break
+            qual1 = "".join(chr(q + 33) for q in r1.letter_annotations["phred_quality"])
             cm = ConsensusMatrix(d)
             cm.update(seq1, qual1)
             timings["consensus build"] += perf_counter() - t
@@ -304,6 +335,8 @@ class RepeatPhasingPipeline:
             del cm
             processed += 1
             yield result
+        
+        print(self.aligner.fallback_count)
 
         total = sum(timings.values())
         if total:
@@ -311,4 +344,5 @@ class RepeatPhasingPipeline:
             for name, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
                 pct = secs / total * 100
                 print(f"  {name:16s}{secs:.3f}s ({pct:.1f}%)")
+
 

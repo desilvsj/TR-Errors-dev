@@ -4,7 +4,6 @@ from time import perf_counter
 from oop_pipeline import RepeatPhasingPipeline
 from tqdm import tqdm
 
-
 def main():
     parser = argparse.ArgumentParser(description="Run OOP repeat phasing pipeline")
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
@@ -12,19 +11,18 @@ def main():
     parser.add_argument("-o", "--output", help="Optional output file")
     parser.add_argument("-n", "--max-reads", type=int, default=None,
                         help="Maximum number of read pairs to process")
-    pipeline = RepeatPhasingPipeline(
-        args.r1, args.r2, sample_size=args.sample_size, max_reads=args.max_reads
-    )
-    progress = tqdm(
-        total=args.max_reads, disable=not args.progress, unit="pairs", leave=False
-    )
+    parser.add_argument("-s", "--sample-size", type=int, default=10000,
+                        help="Pairs to sample for orientation")
     parser.add_argument("--quiet", action="store_true",
                         help="Disable per-read output")
     parser.add_argument("--progress", action="store_true",
                         help="Print live progress (pairs/s)")
     args = parser.parse_args()
 
-    pipeline = RepeatPhasingPipeline(args.r1, args.r2, sample_size=args.sample_size)
+    pipeline = RepeatPhasingPipeline(
+        args.r1, args.r2, sample_size=args.sample_size, max_reads=args.max_reads
+    )
+
     out_fh = None
     if not args.quiet:
         out_fh = open(args.output, "w") if args.output else sys.stdout
@@ -32,7 +30,7 @@ def main():
     t0 = perf_counter()
     count = 0
     total_pair_time = 0.0
-    progress = tqdm(disable=not args.progress, unit="pairs", leave=False)
+    progress = tqdm(total=args.max_reads, disable=not args.progress, unit="pairs", leave=False)
 
     for result in pipeline.run():
         count += 1
@@ -58,7 +56,5 @@ def main():
         f" avg {avg_pair:.4f}s per pair)"
     )
 
-
 if __name__ == "__main__":
     main()
-

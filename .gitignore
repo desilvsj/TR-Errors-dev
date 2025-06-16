@@ -1,4 +1,4 @@
 /reads/
 /local_archive/
-output.*
+*output*.*
 *pyc
