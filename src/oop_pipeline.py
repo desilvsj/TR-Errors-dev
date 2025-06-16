@@ -102,12 +102,29 @@ class ConsensusMatrix:
         best = sum4[best_idx, np.arange(self.d)]
         cons_q = best - (total - best)
         cons_seq = "".join(IDX2BASE[best_idx].tolist())
+        # Track absolute min/max positions added to compute consensus length
+        self.min_pos = 0
+        self.max_pos = -1
+        if positions.size:
+            pos_start = int(positions[0])
+            pos_end = int(positions[-1])
+            if self.max_pos < pos_end:
+                self.max_pos = pos_end
+            if pos_start < self.min_pos:
+                self.min_pos = pos_start
+
         return (
             cons_seq,
             cons_q.tolist(),
             self.quality_matrix,
             self.coverage_vector,
         )
+
+    def consensus_length(self) -> int:
+        """Return the length of the merged consensus region."""
+        if self.max_pos < self.min_pos:
+            return 0
+        return self.max_pos - self.min_pos + 1
 
 
 # ----------------------- RepeatDetector -------------------------
@@ -325,8 +342,7 @@ class RepeatPhasingPipeline:
             self.aligner.merge(cm, seq2, qual2, phi)
             timings["merge"] += perf_counter() - t
             # derive final consensus length after merging both reads
-            final_cons_seq, _, _, _ = cm.to_consensus()
-            consensus_len = len(final_cons_seq)
+            consensus_len = cm.consensus_length()
 
             elapsed = perf_counter() - pair_start
             result = PhasingResult(
