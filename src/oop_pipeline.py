@@ -324,12 +324,15 @@ class RepeatPhasingPipeline:
             t = perf_counter()
             self.aligner.merge(cm, seq2, qual2, phi)
             timings["merge"] += perf_counter() - t
+            # derive final consensus length after merging both reads
+            final_cons_seq, _, _, _ = cm.to_consensus()
+            consensus_len = len(final_cons_seq)
 
             elapsed = perf_counter() - pair_start
             result = PhasingResult(
                 read_id=r1.id,
                 phase_shift=phi,
-                consensus_len=d,
+                consensus_len=consensus_len,
                 elapsed=elapsed,
             )
             del cm
