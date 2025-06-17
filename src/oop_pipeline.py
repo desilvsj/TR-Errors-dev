@@ -102,30 +102,16 @@ class ConsensusMatrix:
         total = np.sum(sum4, axis=0)
         best = sum4[best_idx, np.arange(self.d)]
         cons_q = best - (total - best)
-        cons_seq = "".join(IDX2BASE[best_idx].tolist())
-        # Track absolute min/max positions added to compute consensus length
-        self.min_pos = 0
-        self.max_pos = -1
-        if hasattr(self, "positions") and self.positions.size:
-            pos_start = int(self.positions[0])
-            pos_end = int(self.positions[-1])
-            if self.max_pos < pos_end:
-                self.max_pos = pos_end
-            if pos_start < self.min_pos:
-                self.min_pos = pos_start
-
-        return (
-            cons_seq,
-            cons_q.tolist(),
+        positions = (shift + np.arange(len(idx), dtype=np.int64)) % self.d
+        np.add.at(self.quality_matrix, (idx[valid], positions[valid]), q[valid])
+        np.add.at(self.coverage_vector, positions[valid], 1)
             self.quality_matrix,
             self.coverage_vector,
         )
 
     def consensus_length(self) -> int:
-        """Return the length of the merged consensus region."""
-        if self.max_pos < self.min_pos:
-            return 0
-        return self.max_pos - self.min_pos + 1
+        """Return the fixed consensus length ``d``."""
+        return self.d
 
 
 # ----------------------- RepeatDetector -------------------------
