@@ -14,7 +14,8 @@ This module exposes small classes such as `FastqStream`, `ConsensusMatrix` and
 * **Vectorized consensus**: uses NumPy to build and merge 4×d quality-weighted matrices for speed
 * **Flexible repeat detection**: sliding k-mer search (`find_repeat_dist`) with bounded mismatches
 * **Streaming processing**: handles millions of reads via Biopython’s `SeqIO.parse`
-* **Progress & timing hooks**: easy integration with `tqdm` or custom logging every X pairs
+* **Progress & timing hooks**: optional `--progress` shows a tqdm progress bar with
+  current rate; use `--quiet` to suppress per-read output
 
 ## Requirements
 
@@ -37,7 +38,19 @@ python findRepeatsV5.py <reads_R1.fastq(.gz)> <reads_R2.fastq(.gz)>
 ```
 
 * **R1/R2 paths**: can be plain `.fastq` or gzipped (`.gz`)
-* Output is printed to `stdout` (ID, repeat distance `d`, phase shift φ, consensus sequence, quality string)
+* Output is printed to `stdout` (ID, repeat distance `d`, phase shift φ, merged consensus length, processing time)
+
+### Running the OOP pipeline
+
+```
+python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-size N] [--quiet] [--progress] [--max-reads N]
+```
+
+The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair unless
+`--quiet` is given. Each line contains the read ID, the inferred phase shift, the length of the merged consensus region and the processing time.
+When `--progress` is enabled a `tqdm` progress bar shows the current
+processing rate. Use `--max-reads` to stop after a fixed number of pairs. If `-o/--output` is omitted, results are printed to the console.
+When finished a summary reports total runtime and the processing rate in pairs per second.
 
 ### Running the OOP pipeline
 

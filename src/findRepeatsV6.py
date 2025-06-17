@@ -62,8 +62,9 @@ class RepeatFinder:
     def phreds_to_ascii_string(self, phreds):
         shift = 33
         def _single_phred_to_ascii(q):
-            capped = q if q <= 42 else 42
-            return chr(capped + shift)
+            val = int(q)
+            val = max(0, min(val, 42))
+            return chr(val + shift)
 
         return "".join(_single_phred_to_ascii(q) for q in phreds)
 

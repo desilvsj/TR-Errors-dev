@@ -2,11 +2,12 @@
 import gzip
 from dataclasses import dataclass
 from typing import Iterator, Tuple, List
-
+from time import perf_counter
+from collections import defaultdict
 import numpy as np
 from Bio import SeqIO
 from Bio.Seq import Seq
-
+from numba import njit
 
 # ----------------------- Encoding helpers -----------------------
 
@@ -22,13 +23,13 @@ IDX2BASE = np.array(list("ACGT"), dtype="<U1")
 
 
 def encode_seq(seq: str) -> np.ndarray:
+    """Convert an A/C/G/T string to numeric indices used by the matrix."""
     ascii_vals = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
     return BASE2IDX[ascii_vals]
-
-
+    
 def encode_qual(qual: str) -> np.ndarray:
-    return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int)
-
+    """Turn ASCII-encoded Phred qualities into integer scores."""
+    return (np.frombuffer(qual.encode("ascii"), dtype=np.uint8) - 33).astype(int) # Return a 4-element mask array for Myers's algorithm, caching results.
 
 # ----------------------- FastqStream -----------------------------
 
@@ -36,13 +37,16 @@ class FastqStream:
     """Stream paired FASTQ records."""
 
     def __init__(self, r1_path: str, r2_path: str):
+        """Store file paths for later streaming."""
         self.r1_path = r1_path
         self.r2_path = r2_path
 
     def _open(self, path: str):
+        """Open plain or gzipped FASTQ files transparently."""
         return gzip.open(path, "rt") if path.endswith('.gz') else open(path, 'r')
 
     def __iter__(self) -> Iterator[Tuple[SeqIO.SeqRecord, SeqIO.SeqRecord]]:
+        """Yield pairs of R1/R2 records from the FASTQ streams."""
         with self._open(self.r1_path) as f1, self._open(self.r2_path) as f2:
             it1 = SeqIO.parse(f1, "fastq")
             it2 = SeqIO.parse(f2, "fastq")
@@ -50,6 +54,7 @@ class FastqStream:
                 yield r1, r2
 
     def sample(self, n: int) -> List[Tuple[SeqIO.SeqRecord, SeqIO.SeqRecord]]:
+        """Return the first ``n`` pairs without consuming the iterator."""
         pairs = []
         with self._open(self.r1_path) as f1, self._open(self.r2_path) as f2:
             it1 = SeqIO.parse(f1, "fastq")
@@ -64,43 +69,46 @@ class FastqStream:
 # ----------------------- ConsensusMatrix ------------------------
 
 class ConsensusMatrix:
-    """Maintain a 3-D base/quality matrix for consensus building."""
+    """Quality-weighted consensus matrix with per-position coverage."""
 
     def __init__(self, d: int):
+        """Initialize empty matrices for a repeat unit of length ``d``."""
         self.d = d
-        self.mat = np.zeros((4, d, 1), dtype=int)
-
-    def _ensure_cycles(self, cycle: int):
-        if cycle >= self.mat.shape[2]:
-            pad = cycle + 1 - self.mat.shape[2]
-            self.mat = np.pad(self.mat, ((0, 0), (0, 0), (0, pad)))
+        # Aggregate quality for each base (A,C,G,T) at each position 0..d-1
+        self.quality_matrix = np.zeros((4, d), dtype=int)
+        # Number of bases contributing to each position
+        self.coverage_vector = np.zeros(d, dtype=int)
 
     def update(self, seq: str, qual: str, shift: int = 0):
+        """Add a read to the matrix, optionally shifted by ``shift`` bases."""
         idx = encode_seq(seq)
         q = encode_qual(qual)
-        positions = shift + np.arange(len(idx), dtype=np.int64)
-        cols = positions % self.d
-        cycles = positions // self.d
-        max_cyc = int(cycles.max())
-        self._ensure_cycles(max_cyc)
-        for b in range(4):
-            mask = idx == b
-            if not mask.any():
-                continue
-            c = cycles[mask]
-            col = cols[mask]
-            w = q[mask]
-            for cyc, col_id, weight in zip(c, col, w):
-                self.mat[b, col_id, cyc] += int(weight)
+        self.positions = shift + np.arange(len(idx), dtype=np.int64)
+        cols = self.positions % self.d
 
-    def to_consensus(self) -> Tuple[str, List[int], np.ndarray, int]:
-        sum4 = self.mat.sum(axis=2)
+        valid = idx < 4
+        if not np.any(valid):
+            return
+
+        np.add.at(self.quality_matrix, (idx[valid], cols[valid]), q[valid])
+        np.add.at(self.coverage_vector, cols[valid], 1)
+        
+
+    def to_consensus(self) -> Tuple[str, List[int], np.ndarray, np.ndarray]:
+        """Return consensus string, qualities, and underlying matrices."""
+        sum4 = self.quality_matrix
+
         best_idx = np.argmax(sum4, axis=0)
         total = np.sum(sum4, axis=0)
         best = sum4[best_idx, np.arange(self.d)]
         cons_q = best - (total - best)
-        cons_seq = "".join(IDX2BASE[best_idx].tolist())
-        return cons_seq, cons_q.tolist(), self.mat, self.mat.shape[2]
+        cons_bases = IDX2BASE[best_idx]
+        cons_seq = "".join(cons_bases.tolist())
+        return cons_seq, cons_q.tolist(), self.quality_matrix, self.coverage_vector
+
+    def consensus_length(self) -> int:
+        """Return the fixed consensus length ``d``."""
+        return self.d
 
 
 # ----------------------- RepeatDetector -------------------------
@@ -110,11 +118,15 @@ class NoRepeats(Exception):
 
 
 class RepeatDetector:
+    """Find the repeat unit length using a k-mer search."""
+
     def __init__(self, k: int = 20, max_errors: int = 2):
+        """Configure search window size and allowed mismatches."""
         self.k = k
         self.max_errors = max_errors
 
     def _compare(self, a: str, b: str, errors: int) -> bool:
+        """Return ``True`` if ``a`` and ``b`` differ by at most ``errors`` bases."""
         err = 0
         for x, y in zip(a, b):
             if x != y:
@@ -124,13 +136,18 @@ class RepeatDetector:
         return True
 
     def find_repeat_distance(self, seq: str) -> int:
+        """Return the repeat unit length using a rolling k-mer search."""
         k = self.k
         max_e = self.max_errors
+
         anchor = seq[0:k]
-        max_range = len(seq) - k
-        for i in range(max_range):
-            cand = seq[k + i : 2 * k + i]
-            if self._compare(anchor, cand, max_e):
+
+        for i in range(k + 1):
+            start = k + i
+            candidate = seq[start : start + k]
+            if len(candidate) < k:
+                break
+            if self._compare(anchor, candidate, max_e):
                 return k + i
         raise NoRepeats
 
@@ -146,18 +163,14 @@ class OrientationDecider:
     def _score_orientation(self, cons_idx: np.ndarray, seq: str, qual: str, d: int):
         idx = encode_seq(seq)
         phred = encode_qual(qual)
-        positions = np.arange(len(idx), dtype=np.int64)
-        best_score = -1
-        best_phi = 0
-        for phi in range(d):
-            cols = (phi + positions) % d
-            mask = idx == cons_idx[cols]
-            score = int(phred[mask].sum()) if mask.any() else 0
-            if score > best_score:
-                best_score, best_phi = score, phi
-        return best_score, best_phi
+        pos = np.arange(len(idx))
+        cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+        matches = (idx[np.newaxis, :] == cons_idx[cols])
+        scores = (phred[np.newaxis, :] * matches).sum(axis=1)
+        phi = int(np.argmax(scores))
+        return int(scores[phi]), phi
 
-    def decide_orientation(self, stream: FastqStream, sample_size: int = 1000) -> str:
+    def decide_orientation(self, stream: FastqStream, sample_size: int = 10000) -> str:
         pairs = stream.sample(sample_size)
         forward = 0
         rc = 0
@@ -183,23 +196,56 @@ class OrientationDecider:
                 rc += 1
             else:
                 forward += 1
+        print(f"RC Count: {rc}\nForward Count: {forward}")
         return "RC" if rc > forward else "forward"
 
 
 # ----------------------- PhaseAligner ---------------------------
+# @njit
+# def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 40):
+#     search_limit = len(read_idx) - window + 1
+#     for phi in range(search_limit):  # read shift (phase)
+#         mismatches = 0
+#         for i in range(window):
+#             r = read_idx[phi + i]
+#             if r > 3:
+#                 continue
+#             c = cons_idx[i % d]
+#             if r != c:
+#                 mismatches += 1
+#                 if mismatches > max_errors:
+#                     break
+#         if mismatches <= max_errors:
+#             return phi
+#     return -1
 
 class PhaseAligner:
-    def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> int:
-        positions = np.arange(len(read_idx), dtype=np.int64)
-        best_score = -1
-        best_phi = 0
-        for phi in range(d):
-            cols = (phi + positions) % d
-            mask = read_idx == cons_idx[cols]
-            score = int(read_q[mask].sum()) if mask.any() else 0
-            if score > best_score:
-                best_score, best_phi = score, phi
-        return best_phi
+    def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> Tuple[int, int]:
+        pos = np.arange(len(read_idx))
+        cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+        matches = (read_idx[np.newaxis, :] == cons_idx[cols])
+        scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
+        phi = int(np.argmax(scores))
+        return phi, int(scores[phi])
+
+    # def __init__(self):
+    #     self.fallback_count = 0
+
+    # def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int, max_errors: int = 2, window: int = 40) -> Tuple[int, int | None]:
+    #     # Attempt fast mismatch-limited scan
+    #     max_errors = 5
+    #     phi = lazy_best_shift(cons_idx, read_idx, d, max_errors, window)
+    #     if phi >= 0:
+    #         return phi, None
+
+    #     # Fallback: quality-weighted scoring
+    #     self.fallback_count += 1
+    #     pos = np.arange(len(read_idx))
+    #     cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+    #     matches = (read_idx[np.newaxis, :] == cons_idx[cols])
+    #     scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
+    #     phi = int(np.argmax(scores))
+    #     return phi, int(scores[phi])
 
     def merge(self, matrix: ConsensusMatrix, seq: str, qual: str, shift: int):
         matrix.update(seq, qual, shift=shift)
@@ -209,35 +255,51 @@ class PhaseAligner:
 
 @dataclass
 class PhasingResult:
-    consensus: str
-    qualities: List[int]
+    read_id: str
     phase_shift: int
-    cycles: int
-    matrix: np.ndarray
+    consensus_len: int
+    elapsed: float
 
 
 class RepeatPhasingPipeline:
-    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 40, max_errors: int = 2):
+    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 50, max_errors: int = 2, max_reads: int | None = None):
         self.stream = FastqStream(r1_path, r2_path)
         self.detector = RepeatDetector(k=k, max_errors=max_errors)
         self.decider = OrientationDecider(self.detector)
         self.aligner = PhaseAligner()
         self.sample_size = sample_size
+        self.max_reads = max_reads
 
     def run(self) -> Iterator[PhasingResult]:
+        timings = defaultdict(float)
         orientation = self.decider.decide_orientation(self.stream, self.sample_size)
+        processed = 0
         for r1, r2 in self.stream:
+            if self.max_reads is not None and processed >= self.max_reads:
+                break
+
+            pair_start = perf_counter()
+
+            t = perf_counter()
             seq1 = str(r1.seq)
             try:
                 d = self.detector.find_repeat_distance(seq1)
             except NoRepeats:
                 continue
+            timings["repeat detection"] += perf_counter() - t
+
+            t = perf_counter()
             qual1 = "".join(chr(q + 33) for q in r1.letter_annotations["phred_quality"])
             cm = ConsensusMatrix(d)
             cm.update(seq1, qual1)
-            cons_seq, cons_q, _, _ = cm.to_consensus()
-            cons_idx = encode_seq(cons_seq)
+            timings["consensus build"] += perf_counter() - t
 
+            t = perf_counter()
+            cons_seq, _, _, _ = cm.to_consensus()
+            cons_idx = encode_seq(cons_seq)
+            timings["consensus extract"] += perf_counter() - t
+
+            t = perf_counter()
             seq2 = str(r2.seq)
             qual2 = "".join(chr(q + 33) for q in r2.letter_annotations["phred_quality"])
             if orientation == "RC":
@@ -245,8 +307,33 @@ class RepeatPhasingPipeline:
                 qual2 = qual2[::-1]
             read_idx = encode_seq(seq2)
             read_q = encode_qual(qual2)
-            phi = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
+            timings["R2 prep"] += perf_counter() - t
+
+            t = perf_counter()
+            phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
+            timings["phase alignment"] += perf_counter() - t
+
+            t = perf_counter()
             self.aligner.merge(cm, seq2, qual2, phi)
-            final_seq, final_q, mat, cycles = cm.to_consensus()
-            yield PhasingResult(final_seq, final_q, phi, cycles, mat)
+            timings["merge"] += perf_counter() - t
+            # derive final consensus length after merging both reads
+            consensus_len = cm.consensus_length()
+
+            elapsed = perf_counter() - pair_start
+            result = PhasingResult(
+                read_id=r1.id,
+                phase_shift=phi,
+                consensus_len=consensus_len,
+                elapsed=elapsed,
+            )
+            del cm
+            processed += 1
+            yield result
+
+        total = sum(timings.values())
+        if total:
+            print("Timing summary:")
+            for name, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
+                pct = secs / total * 100
+                print(f"  {name:16s}{secs:.3f}s ({pct:.1f}%)")
 
