@@ -102,12 +102,9 @@ class ConsensusMatrix:
         total = np.sum(sum4, axis=0)
         best = sum4[best_idx, np.arange(self.d)]
         cons_q = best - (total - best)
-        positions = (shift + np.arange(len(idx), dtype=np.int64)) % self.d
-        np.add.at(self.quality_matrix, (idx[valid], positions[valid]), q[valid])
-        np.add.at(self.coverage_vector, positions[valid], 1)
-            self.quality_matrix,
-            self.coverage_vector,
-        )
+        cons_bases = IDX2BASE[best_idx]
+        cons_seq = "".join(cons_bases.tolist())
+        return cons_seq, cons_q.tolist(), self.quality_matrix, self.coverage_vector
 
     def consensus_length(self) -> int:
         """Return the fixed consensus length ``d``."""
@@ -139,27 +136,20 @@ class RepeatDetector:
         return True
 
     def find_repeat_distance(self, seq: str) -> int:
-        """Return the inferred repeat distance in ``seq`` using Myers's search."""
+        """Return the repeat unit length using a rolling k-mer search."""
         k = self.k
         max_e = self.max_errors
-        """
-        Store a ``RepeatDetector`` used during orientation sampling.
-        Score how well ``seq`` aligns at each phase against ``cons_idx``.
-        Return 'RC' if reverse complements score better for most samples.
-        Return the phase shift yielding the highest quality-weighted match.
-        Insert ``seq`` into ``matrix`` at the given phase shift.
-        Summary of phasing for a single read pair.
-        Coordinate repeat detection, orientation, and phasing for a read set.
-        Prepare pipeline components and configure algorithm parameters.
-        Yield ``PhasingResult`` objects for each processed read pair.
-        """
-        arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
-        anchor = arr[:k]
-        windows = np.lib.stride_tricks.sliding_window_view(arr, k)
-        mism = (windows != anchor).sum(axis=1)
-        hits = np.flatnonzero(mism <= max_e)
-        if hits.size:
-            return int(k + hits[0])
+
+        anchor = seq[0:k]
+
+        for i in range(k + 1):
+            start = k + i
+            candidate = seq[start : start + k]
+            if len(candidate) < k:
+                break
+            if self._compare(anchor, candidate, max_e):
+                return k + i
+
         raise NoRepeats
 
 
