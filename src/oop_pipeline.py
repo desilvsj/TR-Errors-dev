@@ -9,7 +9,6 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from numba import njit
 
-
 # ----------------------- Encoding helpers -----------------------
 
 # ASCII base to index (A,C,G,T,N -> 0..4)
@@ -98,6 +97,7 @@ class ConsensusMatrix:
     def to_consensus(self) -> Tuple[str, List[int], np.ndarray, np.ndarray]:
         """Return consensus string, qualities, and underlying matrices."""
         sum4 = self.quality_matrix
+
         best_idx = np.argmax(sum4, axis=0)
         total = np.sum(sum4, axis=0)
         best = sum4[best_idx, np.arange(self.d)]
@@ -149,7 +149,6 @@ class RepeatDetector:
                 break
             if self._compare(anchor, candidate, max_e):
                 return k + i
-
         raise NoRepeats
 
 
@@ -248,7 +247,6 @@ class PhaseAligner:
     #     phi = int(np.argmax(scores))
     #     return phi, int(scores[phi])
 
-
     def merge(self, matrix: ConsensusMatrix, seq: str, qual: str, shift: int):
         matrix.update(seq, qual, shift=shift)
 
@@ -338,5 +336,4 @@ class RepeatPhasingPipeline:
             for name, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
                 pct = secs / total * 100
                 print(f"  {name:16s}{secs:.3f}s ({pct:.1f}%)")
-
 

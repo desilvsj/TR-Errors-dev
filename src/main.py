@@ -4,6 +4,7 @@ from time import perf_counter
 from oop_pipeline import RepeatPhasingPipeline
 from tqdm import tqdm
 
+
 def main():
     parser = argparse.ArgumentParser(description="Run OOP repeat phasing pipeline")
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
