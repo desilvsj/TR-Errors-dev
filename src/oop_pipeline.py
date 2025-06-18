@@ -125,31 +125,31 @@ class RepeatDetector:
         self.k = k
         self.max_errors = max_errors
 
-    def _compare(self, a: str, b: str, errors: int) -> bool:
+    def _compare(self, a: str, b: str, max_errors: int) -> bool:
         """Return ``True`` if ``a`` and ``b`` differ by at most ``errors`` bases."""
         err = 0
         for x, y in zip(a, b):
             if x != y:
                 err += 1
-                if err > errors:
-                    return False
-        return True
+                if err > max_errors:
+                    return None
+        return err
 
     def find_repeat_distance(self, seq: str) -> int:
         """Return the repeat unit length using a rolling k-mer search."""
         k = self.k
-        max_e = self.max_errors
+        anchor = seq[:k]
+        n = len(seq)
+        max_start = n - k
 
-        anchor = seq[0:k]
+        for start in range(k, max_start + 1):
+            window = seq[start:start+k]
+            mis = self._compare(anchor, window, self.max_errors)
+            if mis is not None:
+                # we found a match within budget
+                return start
 
-        for i in range(k + 1):
-            start = k + i
-            candidate = seq[start : start + k]
-            if len(candidate) < k:
-                break
-            if self._compare(anchor, candidate, max_e):
-                return k + i
-        raise NoRepeats
+        raise NoRepeats #(f"No repeat of the first {k}-mer within {self.max_errors} errors")
 
 
 # ----------------------- OrientationDecider ---------------------
@@ -202,7 +202,7 @@ class OrientationDecider:
 
 # ----------------------- PhaseAligner ---------------------------
 @njit
-def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 40):
+def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 25):
     search_limit = len(read_idx) - window + 1
     for phi in range(search_limit):  # read shift (phase)
         mismatches = 0
@@ -228,11 +228,15 @@ class PhaseAligner:
     #     phi = int(np.argmax(scores))
     #     return phi, int(scores[phi])
 
-    def __init__(self):
+    def __init__(self, max_errors, k):
         self.fallback_count = 0
+        self.max_errors = max_errors
+        self.k = k
 
-    def best_shift(self, cons_idx, read_idx, read_q, d, max_errors=2, window=40):
+    def best_shift(self, cons_idx, read_idx, read_q, d):
         # 1) Try the fast, thresholded scan first
+        window = self.k
+        max_errors = self.max_errors
         phi = lazy_best_shift(cons_idx, read_idx, d, max_errors, window)
         if phi >= 0:
             return phi, None      # only phi, no score
@@ -301,19 +305,22 @@ class PhasingResult:
 
 
 class RepeatPhasingPipeline:
-    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 40, max_errors: int = 2, max_reads: int | None = None):
+    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 25, max_errors: int = 2, max_reads: int | None = None):
         self.stream = FastqStream(r1_path, r2_path)
         self.detector = RepeatDetector(k=k, max_errors=max_errors)
         self.decider = OrientationDecider(self.detector)
-        self.aligner = PhaseAligner()
+        self.aligner = PhaseAligner(max_errors=max_errors, k=k)
         self.sample_size = sample_size
         self.max_reads = max_reads
+        self.total_reads = 0
+        self.no_repeat_count = 0
 
     def run(self) -> Iterator[PhasingResult]:
         timings = defaultdict(float)
         orientation = self.decider.decide_orientation(self.stream, self.sample_size)
         processed = 0
         for r1, r2 in self.stream:
+            self.total_reads += 1
             if self.max_reads is not None and processed >= self.max_reads:
                 break
 
@@ -324,6 +331,7 @@ class RepeatPhasingPipeline:
             try:
                 d = self.detector.find_repeat_distance(seq1)
             except NoRepeats:
+                self.no_repeat_count += 1
                 continue
             timings["repeat detection"] += perf_counter() - t
 

@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
 
     pipeline = RepeatPhasingPipeline(
-        args.r1, args.r2, sample_size=args.sample_size, max_reads=args.max_reads
+        args.r1, args.r2, sample_size=args.sample_size, max_reads=args.max_reads, max_errors=2
     )
 
     out_fh = None
@@ -55,7 +55,7 @@ def main():
     print(
         f"Processed {count} results in {duration:.2f}s ({rate:.1f} pairs/s,"
         f" avg {avg_pair:.4f}s per pair)"
-        f"Fall Back Count {pipeline.aligner.fallback_count}"
+        f"\nPercentage of Repeat Reads: {(pipeline.total_reads-pipeline.no_repeat_count)*100/pipeline.total_reads}"
     )
 
 if __name__ == "__main__":
