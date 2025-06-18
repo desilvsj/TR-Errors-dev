@@ -201,39 +201,78 @@ class OrientationDecider:
 
 
 # ----------------------- PhaseAligner ---------------------------
-# @njit
-# def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 40):
-#     search_limit = len(read_idx) - window + 1
-#     for phi in range(search_limit):  # read shift (phase)
-#         mismatches = 0
-#         for i in range(window):
-#             r = read_idx[phi + i]
-#             if r > 3:
-#                 continue
-#             c = cons_idx[i % d]
-#             if r != c:
-#                 mismatches += 1
-#                 if mismatches > max_errors:
-#                     break
-#         if mismatches <= max_errors:
-#             return phi
-#     return -1
+@njit
+def lazy_best_shift(cons_idx, read_idx, d, max_errors, window: int = 40):
+    search_limit = len(read_idx) - window + 1
+    for phi in range(search_limit):  # read shift (phase)
+        mismatches = 0
+        for i in range(window):
+            r = read_idx[phi + i]
+            if r > 3:
+                continue
+            c = cons_idx[i % d]
+            if r != c:
+                mismatches += 1
+                if mismatches > max_errors:
+                    break
+        if mismatches <= max_errors:
+            return phi
+    return -1
 
 class PhaseAligner:
-    def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> Tuple[int, int]:
-        pos = np.arange(len(read_idx))
-        cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
-        matches = (read_idx[np.newaxis, :] == cons_idx[cols])
-        scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
-        phi = int(np.argmax(scores))
-        return phi, int(scores[phi])
+    # def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int) -> Tuple[int, int]:
+    #     pos = np.arange(len(read_idx))
+    #     cols = (pos[np.newaxis, :] + np.arange(d)[:, np.newaxis]) % d
+    #     matches = (read_idx[np.newaxis, :] == cons_idx[cols])
+    #     scores = (read_q[np.newaxis, :] * matches).sum(axis=1)
+    #     phi = int(np.argmax(scores))
+    #     return phi, int(scores[phi])
 
-    # def __init__(self):
-    #     self.fallback_count = 0
+    def __init__(self):
+        self.fallback_count = 0
+
+    def best_shift(self, cons_idx, read_idx, read_q, d, max_errors=2, window=40):
+        # 1) Try the fast, thresholded scan first
+        phi = lazy_best_shift(cons_idx, read_idx, d, max_errors, window)
+        if phi >= 0:
+            return phi, None      # only phi, no score
+
+        # 2) Fallback: do a window-restricted search 
+        #    (mismatch-minimizing, quality tie-breaker)
+        self.fallback_count += 1
+        best_phi   = None
+        best_mis   = window+1
+        best_score = -1
+
+        max_phi = len(read_idx) - window + 1
+        for p in range(max_phi):
+            mis, score = 0, 0
+            for i in range(window):
+                r = read_idx[p+i]
+                if r > 3: 
+                    continue
+                if r != cons_idx[i]:
+                    mis += 1
+                    if mis > max_errors:
+                        break
+                else:
+                    score += read_q[p+i]
+            else:
+                # we never broke → mis ≤ max_errors
+                if mis < best_mis or (mis == best_mis and score > best_score):
+                    best_mis, best_score, best_phi = mis, score, p
+
+        # If best_phi stayed None, you could decide to pick some default (e.g. 0),
+        # but whatever you pick, **only** return that phi:
+        if best_phi is not None:
+            while best_phi >= d:
+                best_phi -= d
+        return best_phi if best_phi is not None else 0, None
+
 
     # def best_shift(self, cons_idx: np.ndarray, read_idx: np.ndarray, read_q: np.ndarray, d: int, max_errors: int = 2, window: int = 40) -> Tuple[int, int | None]:
     #     # Attempt fast mismatch-limited scan
-    #     max_errors = 5
+    #     max_errors = 2
     #     phi = lazy_best_shift(cons_idx, read_idx, d, max_errors, window)
     #     if phi >= 0:
     #         return phi, None
@@ -262,7 +301,7 @@ class PhasingResult:
 
 
 class RepeatPhasingPipeline:
-    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 50, max_errors: int = 2, max_reads: int | None = None):
+    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 40, max_errors: int = 2, max_reads: int | None = None):
         self.stream = FastqStream(r1_path, r2_path)
         self.detector = RepeatDetector(k=k, max_errors=max_errors)
         self.decider = OrientationDecider(self.detector)

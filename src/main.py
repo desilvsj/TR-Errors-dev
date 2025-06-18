@@ -55,6 +55,7 @@ def main():
     print(
         f"Processed {count} results in {duration:.2f}s ({rate:.1f} pairs/s,"
         f" avg {avg_pair:.4f}s per pair)"
+        f"Fall Back Count {pipeline.aligner.fallback_count}"
     )
 
 if __name__ == "__main__":
