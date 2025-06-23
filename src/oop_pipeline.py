@@ -293,6 +293,27 @@ class PhaseAligner:
     def merge(self, matrix: ConsensusMatrix, seq: str, qual: str, shift: int):
         matrix.update(seq, qual, shift=shift)
 
+# ----------------------- ResultWriter Class ------------------
+
+class ResultWriter:
+    def __init__(self, fastq_path: str, meta_path: str):
+        # open FASTQ output (gzipped) and metadata output
+        self.fastq_fh = gzip.open(fastq_path, "wt")
+        self.meta_fh  = gzip.open(meta_path, "wt")
+
+    def write(self, read_id: str, seq: str, quals: str, length: int, phase: int):
+        # write a FASTQ record
+        print(f"@{read_id}", file=self.fastq_fh)
+        print(seq,       file=self.fastq_fh)
+        print("+",       file=self.fastq_fh)
+        print(quals,     file=self.fastq_fh)
+        # write metadata: read_id, consensus length, phase shift
+        self.meta_fh.write(f"{read_id}\t{length}\t{phase}\n")
+
+    def close(self):
+        self.fastq_fh.close()
+        self.meta_fh.close()
+
 
 # ----------------------- RepeatPhasingPipeline ------------------
 
@@ -305,7 +326,8 @@ class PhasingResult:
 
 
 class RepeatPhasingPipeline:
-    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 25, max_errors: int = 2, max_reads: int | None = None):
+    """Final Outputs: Read ID, Length of Consensus, Phase Shift, Double Consensus (with Quality Scores)"""
+    def __init__(self, r1_path: str, r2_path: str, sample_size: int = 1000, k: int = 25, max_errors: int = 2, max_reads: int | None = None, fastq_out: str = "output.fastq.gz", meta_out: str  = "metadata.txt.gz"):
         self.stream = FastqStream(r1_path, r2_path)
         self.detector = RepeatDetector(k=k, max_errors=max_errors)
         self.decider = OrientationDecider(self.detector)
@@ -314,6 +336,7 @@ class RepeatPhasingPipeline:
         self.max_reads = max_reads
         self.total_reads = 0
         self.no_repeat_count = 0
+        self.writer = ResultWriter(fastq_out, meta_out)
 
     def run(self) -> Iterator[PhasingResult]:
         timings = defaultdict(float)
@@ -363,14 +386,30 @@ class RepeatPhasingPipeline:
             t = perf_counter()
             self.aligner.merge(cm, seq2, qual2, phi)
             timings["merge"] += perf_counter() - t
-            # derive final consensus length after merging both reads
-            consensus_len = cm.consensus_length()
+
+            # derive final consensus length (single)
+            single_len = cm.consensus_length()
+
+            # extract final consensus string and quality list
+            single_seq, single_q, _, _ = cm.to_consensus()
+            # build ASCII-encoded quality string for single consensus, clamp values to [0,42]
+            qstr_single = "".join(
+                chr(max(0, min(int(q), 42)) + 33)
+                for q in single_q
+            )
+
+            # create double consensus (sequence and qualities concatenated twice)
+            double_seq = single_seq + single_seq
+            qstr_double = qstr_single + qstr_single
+
+            # write double-consensus FASTQ and metadata (metadata uses single consensus length)
+            self.writer.write(r1.id, double_seq, qstr_double, single_len, phi)
 
             elapsed = perf_counter() - pair_start
             result = PhasingResult(
                 read_id=r1.id,
                 phase_shift=phi,
-                consensus_len=consensus_len,
+                consensus_len=single_len,
                 elapsed=elapsed,
             )
             del cm
@@ -383,4 +422,7 @@ class RepeatPhasingPipeline:
             for name, secs in sorted(timings.items(), key=lambda x: x[1], reverse=True):
                 pct = secs / total * 100
                 print(f"  {name:16s}{secs:.3f}s ({pct:.1f}%)")
+        
+        # close output files
+        self.writer.close()
 
