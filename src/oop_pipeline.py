@@ -314,6 +314,10 @@ class ResultWriter:
         self.fastq_fh.close()
         self.meta_fh.close()
 
+# ----------------------- Helper Functions -----------------------
+
+def rotate_back(seq, q, phi):
+    return seq[-phi:] + seq[:-phi], q[-phi:] + q[:-phi]
 
 # ----------------------- RepeatPhasingPipeline ------------------
 
@@ -383,8 +387,14 @@ class RepeatPhasingPipeline:
             phi, _ = self.aligner.best_shift(cons_idx, read_idx, read_q, d)
             timings["phase alignment"] += perf_counter() - t
 
+            # t = perf_counter()
+            # self.aligner.merge(cm, seq2, qual2, phi)
+            # timings["merge"] += perf_counter() - t
+
             t = perf_counter()
-            self.aligner.merge(cm, seq2, qual2, phi)
+            rot_seq2 = seq2[phi:] + seq2[:phi]
+            rot_qual2 = qual2[phi:] + qual2[:phi]
+            cm.update(rot_seq2, rot_qual2, shift=0)
             timings["merge"] += perf_counter() - t
 
             # derive final consensus length (single)
@@ -392,6 +402,7 @@ class RepeatPhasingPipeline:
 
             # extract final consensus string and quality list
             single_seq, single_q, _, _ = cm.to_consensus()
+            # single_seq, single_q = rotate_back(single_seq, single_q, phi)
             # build ASCII-encoded quality string for single consensus, clamp values to [0,42]
             qstr_single = "".join(
                 chr(max(0, min(int(q), 42)) + 33)
