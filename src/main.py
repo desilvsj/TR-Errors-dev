@@ -11,13 +11,13 @@ def main():
     parser.add_argument("r2", help="R2 FASTQ (.gz accepted)")
     parser.add_argument(
         "--fastq-out",
-        default="output.fastq.gz",
-        help="Path to output gzipped FASTQ file containing the double-consensus sequences (default: output.fastq.gz)",
+        default="outputs/output.fastq.gz",
+        help="Path to output gzipped FASTQ file containing the double-consensus sequences (default: outputs/output.fastq.gz)",
     )
     parser.add_argument(
         "--meta-out",
-        default="metadata.txt.gz",
-        help="Path to output gzipped metadata file with read ID, consensus length, and phase shift (default: metadata.txt.gz)",
+        default="outputs/metadata.txt.gz",
+        help="Path to output gzipped metadata file with read ID, consensus length, and phase shift (default: outputs/metadata.txt.gz)",
     )
     parser.add_argument("-o", "--output", help="Optional output file")
     parser.add_argument("-n", "--max-reads", type=int, default=None,

@@ -8,6 +8,7 @@ import numpy as np
 from Bio import SeqIO
 from Bio.Seq import Seq
 from numba import njit
+import os
 
 # ----------------------- Encoding helpers -----------------------
 
@@ -298,6 +299,14 @@ class PhaseAligner:
 class ResultWriter:
     def __init__(self, fastq_path: str, meta_path: str):
         # open FASTQ output (gzipped) and metadata output
+        meta_dir = os.path.dirname(meta_path)
+        if meta_dir:
+            os.makedirs(meta_dir, exist_ok=True)
+
+        fastq_dir = os.path.dirname(fastq_path)
+        if fastq_dir:
+            os.makedirs(fastq_dir, exist_ok=True)
+
         self.fastq_fh = gzip.open(fastq_path, "wt")
         self.meta_fh  = gzip.open(meta_path, "wt")
 
