@@ -1,3 +1,5 @@
+"""Command line interface for the object oriented repeat phasing pipeline."""
+
 import sys
 import argparse
 from time import perf_counter
@@ -6,6 +8,7 @@ from tqdm import tqdm
 
 
 def main():
+    """Parse arguments and execute the repeat phasing pipeline."""
     parser = argparse.ArgumentParser(description="Run OOP repeat phasing pipeline")
     parser.add_argument("r1", help="R1 FASTQ (.gz accepted)")
     parser.add_argument("r2", help="R2 FASTQ (.gz accepted)")

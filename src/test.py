@@ -34,6 +34,7 @@ def read_fastq_record(handle):
 
 
 def main():
+    """Command line entry point for aligning R2 to R1 using phase data."""
     parser = argparse.ArgumentParser(description="Align R2 to R1 using phase-shift data.")
     parser.add_argument('--output', '-o', default='output.txt',
                         help='Phase data file (ID, PHI, LENGTH)')
