@@ -27,8 +27,11 @@ This module exposes small classes such as `FastqStream`, `ConsensusMatrix` and
 
 ## Installation
 
+Install the required Python packages using `pip` and the provided
+`requirements.txt` file:
+
 ```bash
-pip install numpy biopython tqdm
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -52,16 +55,8 @@ When `--progress` is enabled a `tqdm` progress bar shows the current
 processing rate. Use `--max-reads` to stop after a fixed number of pairs. If `-o/--output` is omitted, results are printed to the console.
 When finished a summary reports total runtime and the processing rate in pairs per second.
 
-### Running the OOP pipeline
+Sample FASTQ files for a quick test run are provided under `sample_reads/`.
 
-```
-python -m src.main <R1.fastq(.gz)> <R2.fastq(.gz)> [-o results.txt] [--sample-size N]
-```
-
-The script iterates over all read pairs using `RepeatPhasingPipeline` and writes one line per processed pair
-containing the phase shift, cycle count, consensus sequence and quality string. If `-o/--output` is omitted,
-results are printed to the console. When finished a summary reports total runtime and the processing rate in
-pairs per second.
 
 ## Configuration
 

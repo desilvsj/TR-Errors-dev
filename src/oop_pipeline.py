@@ -1,4 +1,10 @@
-# Object-oriented repeat phasing pipeline
+"""Object-oriented repeat phasing pipeline.
+
+The classes defined here break the repeat phasing logic into small reusable
+components.  They are used by ``main.py`` to process paired-end FASTQ files and
+produce phased consensus reads.
+"""
+
 import gzip
 from dataclasses import dataclass
 from typing import Iterator, Tuple, List
@@ -297,6 +303,7 @@ class PhaseAligner:
 # ----------------------- ResultWriter Class ------------------
 
 class ResultWriter:
+    """Helper for writing output FASTQ and metadata files."""
     def __init__(self, fastq_path: str, meta_path: str):
         # open FASTQ output (gzipped) and metadata output
         meta_dir = os.path.dirname(meta_path)
@@ -326,12 +333,15 @@ class ResultWriter:
 # ----------------------- Helper Functions -----------------------
 
 def rotate_back(seq, q, phi):
+    """Rotate ``seq`` and ``q`` backwards by ``phi`` bases."""
     return seq[-phi:] + seq[:-phi], q[-phi:] + q[:-phi]
 
 # ----------------------- RepeatPhasingPipeline ------------------
 
 @dataclass
 class PhasingResult:
+    """Container for results yielded by :class:`RepeatPhasingPipeline`."""
+
     read_id: str
     phase_shift: int
     consensus_len: int

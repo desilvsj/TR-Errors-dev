@@ -1,3 +1,10 @@
+"""Legacy repeat phasing implementation.
+
+This module contains a procedural implementation for detecting repeat units
+and phasing paired-end reads.  It mirrors the logic found in the object
+oriented pipeline but keeps the code in a single class for clarity.
+"""
+
 from Bio import SeqIO
 from Bio.Seq import Seq
 import gzip
@@ -11,6 +18,7 @@ class NoRepeats(Exception):
     pass
 
 class RepeatFinder:
+    """Utility class implementing repeat detection and phasing helpers."""
     def __init__(self):
         # Build once: ASCII→{0,1,2,3,4}
         self.base2idx = np.full(256, 4, dtype=np.int8)
@@ -54,12 +62,14 @@ class RepeatFinder:
         raise NoRepeats
 
     def generate_stack(self, sequence: str, delta_d: int) -> list:
+        """Split ``sequence`` into ``delta_d`` sized chunks."""
         segments = []
         for i in range(0, len(sequence), delta_d):
             segments.append(sequence[i : i + delta_d])
         return segments
 
     def phreds_to_ascii_string(self, phreds):
+        """Convert a list of numeric Phred scores to an ASCII string."""
         shift = 33
         def _single_phred_to_ascii(q):
             capped = q if q <= 42 else 42
