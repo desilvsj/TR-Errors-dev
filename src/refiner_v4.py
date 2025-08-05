@@ -51,7 +51,7 @@ def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
             "phi": phi,
             "consensus_length": d,
             "single_consensus": cropped,
-            "num_matches": d  # perfect match assumed in Phase 1
+            "num_matches": d
         }
     return None
 
@@ -101,6 +101,8 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
     results = []
     count = 0
+    chimera_count = 0
+
     for read in bamfile.fetch(until_eof=True):
         if max_reads is not None and count >= max_reads:
             break
@@ -151,9 +153,10 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 read.reference_start = phase2_result["ref_start"]
                 read.query_sequence = new_seq
 
-                chimeric_ratio = (d-matches)/d
+                chimeric_ratio = (d - matches) / d
                 if chimeric_ratio > 0.05:
                     chimera = 1
+                    chimera_count += 1
                 else:
                     chimera = 0
                 try:
@@ -168,7 +171,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 read.set_tag("BP", phi)
                 read.set_tag("ST", "-" if is_rev else "A")
                 read.set_tag("CL", d)
-                read.set_tag("MT", matches)  # MT = Match Total (custom)
+                read.set_tag("MT", matches)
                 read.set_tag("CH", chimera)
 
             else:
@@ -182,6 +185,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
     bamfile.close()
     outfile.close()
+    print(f"Chimeras detected: {chimera_count}")
     return results
 
 
