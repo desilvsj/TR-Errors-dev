@@ -50,44 +50,47 @@ def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
             "is_reverse": is_rev,
             "phi": phi,
             "consensus_length": d,
-            "single_consensus": cropped
+            "single_consensus": cropped,
+            "num_matches": d  # perfect match assumed in Phase 1
         }
     return None
 
+
 def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
-    # Run local alignment
     aligner = Align.PairwiseAligner()
     aligner.mode = "local"
+    aligner.match_score = 2
+    aligner.mismatch_score = -10
+    aligner.open_gap_score = -100
+    aligner.extend_gap_score = -20
 
-    # Edit scoring
-    aligner.match_score = 2       # score for matching bases
-    aligner.mismatch_score = -1   # penalty for mismatches
-    aligner.open_gap_score = -2   # penalty for opening a gap
-    aligner.extend_gap_score = -0.5  # penalty for extending a gap
-
-    # Perform alignment
     alignments = aligner.align(ref_seq, double_consensus)
-    ref_start = alignments[0].aligned[0][0][0]
+    best = alignments[0]
+    ref_start = best.aligned[0][0][0]
+    query_start = int(best.aligned[1][0][0])
+    query_end = int(best.aligned[1][-1][1])
+    matches = query_end - query_start
 
     return {
         "phase": 2,
         "ref_start": ref_start,
         "is_reverse": False,
-        "phi": int(alignments[0].aligned[1][0][0]),
+        "phi": query_start,
         "consensus_length": consensus_length,
-        "single_consensus": double_consensus[alignments[0].aligned[1][0][0]: alignments[0].aligned[1][0][0] + consensus_length]
+        "single_consensus": double_consensus[query_start: query_start + consensus_length],
+        "num_matches": matches
     }
 
 
 def run_phase2_placeholder(ref_seq: str, double_consensus: str, consensus_length: int):
-    # Placeholder implementation
     return {
         "phase": 2,
         "ref_start": 150,
         "is_reverse": False,
         "phi": 3,
         "consensus_length": consensus_length,
-        "single_consensus": double_consensus[3:3 + consensus_length]
+        "single_consensus": double_consensus[3:3 + consensus_length],
+        "num_matches": consensus_length - 1
     }
 
 
@@ -127,11 +130,6 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
             read.is_unmapped = False
             read.is_reverse = is_rev
 
-            # BAM tags:
-            # PH: Phase assignment (1 = Phase 1 success, 2 = failed Phase 1)
-            # BP: Phi shift (start position offset used within the double consensus)
-            # ST: Strand tag ('A' = forward, '-' = reverse)
-            # CL: Consensus length (length of aligned single consensus)
             read.set_tag("PH", 1)
             read.set_tag("BP", phi)
             read.set_tag("ST", "-" if is_rev else "A")
@@ -148,9 +146,16 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 phi = phase2_result["phi"]
                 is_rev = phase2_result["is_reverse"]
                 new_seq = phase2_result["single_consensus"]
+                matches = phase2_result["num_matches"]
 
                 read.reference_start = phase2_result["ref_start"]
                 read.query_sequence = new_seq
+
+                chimeric_ratio = (d-matches)/d
+                if chimeric_ratio > 0.05:
+                    chimera = 1
+                else:
+                    chimera = 0
                 try:
                     quals = read.query_qualities
                     read.query_qualities = quals[phi:phi + d]
@@ -163,9 +168,12 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 read.set_tag("BP", phi)
                 read.set_tag("ST", "-" if is_rev else "A")
                 read.set_tag("CL", d)
+                read.set_tag("MT", matches)  # MT = Match Total (custom)
+                read.set_tag("CH", chimera)
+
             else:
                 read.is_unmapped = True
-                read.set_tag("PH", 4)  # Phase 2 failed
+                read.set_tag("PH", 4)
 
             results.append(phase2_result)
             outfile.write(read)
@@ -188,15 +196,12 @@ def main():
     output_bam_path = f"{args.output_prefix}.bam"
     results = refiner_pipeline(args.bam, args.fasta, output_bam_path, max_reads=args.max_reads)
 
-    # Simple summary print
     phase1_count = sum(1 for r in results if r["phase"] == 1)
     phase2_count = sum(1 for r in results if r["phase"] == 2)
 
     print(f"Pipeline complete: {len(results)} reads processed.")
     print(f" - Phase 1 successful: {phase1_count}")
     print(f" - Phase 2 (fallback): {phase2_count}")
-
-
 
 
 if __name__ == "__main__":
