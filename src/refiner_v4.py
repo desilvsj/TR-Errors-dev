@@ -7,7 +7,6 @@ import argparse
 from Bio import Align
 import time
 
-
 def parse_edlib_cigar(cigar: str):
     import re
     if not cigar:
@@ -15,16 +14,13 @@ def parse_edlib_cigar(cigar: str):
     ops = {'M': 0, 'I': 1, 'D': 2}
     return [(ops[op], int(length)) for length, op in re.findall(r'(\d+)([MID])', cigar)]
 
-
 def sort_bam_by_reference_name(bam_path: str, sorted_bam_path: str):
     pysam.sort("-o", sorted_bam_path, "-n", bam_path)
     return sorted_bam_path
 
-
 def crop_double_consensus(dc: str, phi: int, d: int, reverse: bool) -> str:
     seq = dc[phi:phi + d]
     return str(Seq(seq).reverse_complement()) if reverse else seq
-
 
 def find_exact_consensus_match(ref_seq: str, double_consensus: str, kallisto_index: int) -> Tuple[Optional[int], Optional[bool], Optional[int]]:
     d = len(double_consensus) // 2
@@ -38,7 +34,6 @@ def find_exact_consensus_match(ref_seq: str, double_consensus: str, kallisto_ind
         if pos_rc != -1:
             return pos_rc, True, phi
     return None, None, None
-
 
 def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
     match_pos, is_rev, phi = find_exact_consensus_match(ref_seq, double_consensus, kallisto_index)
@@ -55,7 +50,6 @@ def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
             "num_matches": d
         }
     return None
-
 
 def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
     aligner = Align.PairwiseAligner()
@@ -82,21 +76,11 @@ def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
         "num_matches": matches
     }
 
-
-def run_phase2_placeholder(ref_seq: str, double_consensus: str, consensus_length: int):
-    return {
-        "phase": 2,
-        "ref_start": 150,
-        "is_reverse": False,
-        "phi": 3,
-        "consensus_length": consensus_length,
-        "single_consensus": double_consensus[3:3 + consensus_length],
-        "num_matches": consensus_length - 1
-    }
-
-
 def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_reads: Optional[int] = None):
+    t_load_start = time.time()
     ref_dict = SeqIO.to_dict(SeqIO.parse(fasta_path, "fasta"))
+    t_load_end = time.time()
+
     bamfile = pysam.AlignmentFile(bam_path, "rb")
     outfile = pysam.AlignmentFile(output_bam_path, "wb", template=bamfile)
 
@@ -111,7 +95,6 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     for read in bamfile.fetch(until_eof=True):
         if max_reads is not None and count >= max_reads:
             break
-
         if read.is_unmapped or read.reference_name not in ref_dict:
             continue
 
@@ -199,6 +182,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     total_time = time.time() - t0
     rps = count / total_time if total_time > 0 else 0
 
+    print(f"Time to load fasta: {t_load_end - t_load_start:.2f}s")
     print(f"Chimeras detected: {chimera_count}")
     print(f"Total time: {total_time:.2f}s")
     print(f" - Phase 1 total time: {t_phase1:.2f}s")
@@ -206,7 +190,6 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     print(f" - Reads per second: {rps:.2f}")
 
     return results
-
 
 def main():
     parser = argparse.ArgumentParser(description="TR-Errors Refinement Pipeline")
@@ -225,7 +208,6 @@ def main():
     print(f"Pipeline complete: {len(results)} reads processed.")
     print(f" - Phase 1 successful: {phase1_count}")
     print(f" - Phase 2 (fallback): {phase2_count}")
-
 
 if __name__ == "__main__":
     main()
