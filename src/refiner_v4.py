@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Tuple, Optional
 import argparse
 from Bio import Align
+import time
 
 
 def parse_edlib_cigar(cigar: str):
@@ -103,6 +104,10 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     count = 0
     chimera_count = 0
 
+    t0 = time.time()
+    t_phase1 = 0
+    t_phase2 = 0
+
     for read in bamfile.fetch(until_eof=True):
         if max_reads is not None and count >= max_reads:
             break
@@ -114,7 +119,10 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
         dc = read.query_sequence
         kidx = read.reference_start
 
+        t1_start = time.time()
         phase1_result = run_phase1(ref_seq, dc, kidx)
+        t_phase1 += time.time() - t1_start
+
         if phase1_result:
             d = phase1_result["consensus_length"]
             phi = phase1_result["phi"]
@@ -141,7 +149,9 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
         else:
             d = len(dc) // 2
+            t2_start = time.time()
             phase2_result = run_phase2(ref_seq, dc, d)
+            t_phase2 += time.time() - t2_start
 
             if phase2_result["ref_start"] is not None:
                 d = phase2_result["consensus_length"]
@@ -185,7 +195,16 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
     bamfile.close()
     outfile.close()
+
+    total_time = time.time() - t0
+    rps = count / total_time if total_time > 0 else 0
+
     print(f"Chimeras detected: {chimera_count}")
+    print(f"Total time: {total_time:.2f}s")
+    print(f" - Phase 1 total time: {t_phase1:.2f}s")
+    print(f" - Phase 2 total time: {t_phase2:.2f}s")
+    print(f" - Reads per second: {rps:.2f}")
+
     return results
 
 
