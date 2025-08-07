@@ -57,30 +57,6 @@ def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
         }
     return None
 
-def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
-    aligner = Align.PairwiseAligner()
-    aligner.mode = "local"
-    aligner.match_score = 2
-    aligner.mismatch_score = -10
-    aligner.open_gap_score = -100
-    aligner.extend_gap_score = -20
-
-    alignments = aligner.align(ref_seq, double_consensus)
-    best = alignments[0]
-    ref_start = best.aligned[0][0][0]
-    query_start = int(best.aligned[1][0][0])
-    query_end = int(best.aligned[1][-1][1])
-    matches = query_end - query_start
-
-    return {
-        "phase": 2,
-        "ref_start": ref_start,
-        "is_reverse": False,
-        "phi": query_start,
-        "consensus_length": consensus_length,
-        "single_consensus": double_consensus[query_start: query_start + consensus_length],
-        "num_matches": matches
-    }
 
 def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: int):
     matrix = parasail.matrix_create("ACGT", 10, -20)
