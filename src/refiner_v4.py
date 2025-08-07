@@ -118,21 +118,23 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     outfile = pysam.AlignmentFile(output_bam_path, "wb", template=bamfile)
 
     results = []
-    count = 0
+    processed_count = 0
     chimera_count = 0
     discard_count = 0
+    total_touched = 0
 
     t0 = time.time()
     t_phase1 = 0
     t_phase2 = 0
 
     for read in bamfile.fetch(until_eof=True):
+        total_touched += 1
         # Filter to primary alignments only
         if read.is_secondary or read.is_supplementary:
             discard_count += 1
             continue
 
-        if max_reads is not None and count >= max_reads:
+        if max_reads is not None and processed_count >= max_reads:
             break
         if read.is_unmapped or read.reference_name not in ref_dict:
             continue
@@ -213,21 +215,22 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
             results.append(phase2_result)
             outfile.write(read)
 
-        count += 1
+        processed_count += 1
 
     bamfile.close()
     outfile.close()
 
     total_time = time.time() - t0
-    rps = count / total_time if total_time > 0 else 0
+    rps = total_touched / total_time if total_time > 0 else 0
 
     print(f"Time to load fasta: {t_load_end - t_load_start:.2f}s")
     print(f"Chimeras detected: {chimera_count}")
     print(f"Reads discarded (non-primary): {discard_count}")
+    print(f"Total reads touched: {total_touched}")
     print(f"Total time: {total_time:.2f}s")
     print(f" - Phase 1 total time: {t_phase1:.2f}s")
     print(f" - Phase 2 total time: {t_phase2:.2f}s")
-    print(f" - Reads per second: {rps:.2f}")
+    print(f" - Reads per second (all reads): {rps:.2f}")
 
     return results
 
@@ -242,8 +245,8 @@ def main():
     output_bam_path = f"{args.output_prefix}.bam"
     results = refiner_pipeline(args.bam, args.fasta, output_bam_path, max_reads=args.max_reads)
 
-    phase1_count = sum(1 for r in results if r["phase"] == 1)
-    phase2_count = sum(1 for r in results if r["phase"] == 2)
+    phase1_count = sum(1 for r in results if r and r.get("phase") == 1)
+    phase2_count = sum(1 for r in results if r and r.get("phase") == 2)
 
     print(f"Pipeline complete: {len(results)} reads processed.")
     print(f" - Phase 1 successful: {phase1_count}")
