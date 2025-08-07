@@ -6,6 +6,12 @@ from typing import Tuple, Optional
 import argparse
 from Bio import Align
 import time
+"""
+Parasail Library
+Daily, Jeff. (2016). Parasail: SIMD C library for global, semi-global, and local pairwise sequence alignments. BMC Bioinformatics, 17(1), 1-11. doi:10.1186/s12859-016-0930-z
+http://dx.doi.org/10.1186/s12859-016-0930-z
+"""
+import parasail
 
 def parse_edlib_cigar(cigar: str):
     import re
@@ -76,6 +82,34 @@ def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
         "num_matches": matches
     }
 
+def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: int):
+    matrix = parasail.matrix_create("ACGT", 10, -20)
+
+    # Perform local (Smith–Waterman) with striped vectors, 16-bit
+    result = parasail.sw_trace_striped_16(double_consensus, ref_seq, 200, 10, matrix)
+
+    # Extract the aligned strings
+    # aligned_ref   = result.traceback.ref
+    # aligned_query = result.traceback.query
+
+    start_ref   = result.cigar.beg_ref    # CIGAR start on reference :contentReference[oaicite:2]{index=2}
+    end_ref     = result.end_ref          # CIGAR end on reference :contentReference[oaicite:3]{index=3}
+    start_query = result.cigar.beg_query  # CIGAR start on query :contentReference[oaicite:4]{index=4}
+    end_query   = result.end_query        # CIGAR end on query :contentReference[oaicite:5]{index=5}
+
+    matches = end_query - start_query
+
+
+    return {
+        "phase": 2,
+        "ref_start": start_ref,
+        "is_reverse": False,
+        "phi": start_query,
+        "consensus_length": consensus_length,
+        "single_consensus": double_consensus[start_query:end_query],
+        "num_matches": matches
+    }
+
 def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_reads: Optional[int] = None):
     t_load_start = time.time()
     ref_dict = SeqIO.to_dict(SeqIO.parse(fasta_path, "fasta"))
@@ -133,7 +167,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
         else:
             d = len(dc) // 2
             t2_start = time.time()
-            phase2_result = run_phase2(ref_seq, dc, d)
+            phase2_result = run_phase2_parasail(ref_seq, dc, d)
             t_phase2 += time.time() - t2_start
 
             if phase2_result["ref_start"] is not None:
