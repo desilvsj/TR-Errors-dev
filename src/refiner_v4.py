@@ -99,7 +99,6 @@ def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: i
 
     matches = end_query - start_query
 
-
     return {
         "phase": 2,
         "ref_start": start_ref,
@@ -121,12 +120,18 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     results = []
     count = 0
     chimera_count = 0
+    discard_count = 0
 
     t0 = time.time()
     t_phase1 = 0
     t_phase2 = 0
 
     for read in bamfile.fetch(until_eof=True):
+        # Filter to primary alignments only
+        if read.is_secondary or read.is_supplementary:
+            discard_count += 1
+            continue
+
         if max_reads is not None and count >= max_reads:
             break
         if read.is_unmapped or read.reference_name not in ref_dict:
@@ -218,6 +223,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
     print(f"Time to load fasta: {t_load_end - t_load_start:.2f}s")
     print(f"Chimeras detected: {chimera_count}")
+    print(f"Reads discarded (non-primary): {discard_count}")
     print(f"Total time: {total_time:.2f}s")
     print(f" - Phase 1 total time: {t_phase1:.2f}s")
     print(f" - Phase 2 total time: {t_phase2:.2f}s")
