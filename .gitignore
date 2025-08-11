@@ -6,3 +6,4 @@
 *.bam
 *.sam
 *.csv
+*gff3
