@@ -82,6 +82,20 @@ def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: i
 
     matches = end_query - start_query
 
+        # --- NEW: compute matches/mismatches/indels from traceback ---
+    aln_ref  = result.traceback.ref
+    aln_qry  = result.traceback.query
+    mt = mm = ins = dels = 0
+    for r, q in zip(aln_ref, aln_qry):
+        if r != '-' and q != '-':
+            if r == q: mt += 1
+            else:      mm += 1
+        elif r == '-' and q != '-':
+            ins += 1
+        elif r != '-' and q == '-':
+            dels += 1
+    nm = mm + ins + dels  # SAM-standard edit distance
+
     return {
         "phase": 2,
         "ref_start": start_ref,
@@ -89,7 +103,8 @@ def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: i
         "phi": start_query,
         "consensus_length": consensus_length,
         "single_consensus": double_consensus[start_query:end_query],
-        "num_matches": matches
+        "num_matches": matches,
+        "num_mismatches": nm
     }
 
 def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_reads: Optional[int] = None):
@@ -156,7 +171,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
             read.set_tag("PH", 1)
             read.set_tag("BP", phi)
-            read.set_tag("ST", "-" if is_rev else "A")
+            # read.set_tag("ST", "-" if is_rev else "A")
             read.set_tag("CL", d)
             read.set_tag("RC", reversal_stat)
             results.append(phase1_result)
@@ -174,6 +189,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 is_rev = phase2_result["is_reverse"]
                 new_seq = phase2_result["single_consensus"]
                 matches = phase2_result["num_matches"]
+                nm = phase2_result["num_mismatches"]
 
                 read.reference_start = phase2_result["ref_start"]
                 read.query_sequence = new_seq
@@ -192,17 +208,18 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 read.cigartuples = [(0, len(new_seq))]
                 read.is_unmapped = False
                 read.is_reverse = is_rev
-                read.set_tag("PH", 3)
+                read.set_tag("PH", 2)
                 read.set_tag("BP", phi)
-                read.set_tag("ST", "-" if is_rev else "A")
+                # read.set_tag("ST", "-" if is_rev else "A")
                 read.set_tag("CL", d)
                 read.set_tag("MT", matches)
+                read.set_tag("NM", nm)
                 read.set_tag("CH", chimera)
                 read.set_tag("RC", reversal_stat)
 
             else:
                 read.is_unmapped = True
-                read.set_tag("PH", 4)
+                read.set_tag("PH", 3)
 
             results.append(phase2_result)
             outfile.write(read)
