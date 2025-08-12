@@ -1,6 +1,6 @@
 # TR‑Errors Pipeline
 
-Refine Rolling Circle Amplification (RCA) read alignments by cropping a **double** consensus into a **single** consensus and placing it on the reference transcript. The pipeline runs a fast exact search (Phase‑1) and falls back to a SIMD‑accelerated Smith–Waterman (Phase‑2 via Parasail). Output is a BAM with lightweight, interpretable tags.
+Refine Rolling Circle Amplification (RCA) read alignments in **two stages**. Stage 1 builds a **double‑consensus** FASTQ from paired R1/R2 reads (OOP pipeline). Stage 2 consumes an external aligner’s BAM (e.g., **Kalipso/Kallisto**) and produces a refined BAM where a **single consensus** is placed on the reference using a fast exact pass (Phase‑1) with a SIMD‑accelerated Smith–Waterman fallback (Phase‑2 via Parasail).
 
 ---
 
@@ -25,10 +25,10 @@ Refine Rolling Circle Amplification (RCA) read alignments by cropping a **double
 
 ## Features
 
-* **Two‑phase placement**
+* **Two‑stage pipeline**
 
-  * **Phase‑1**: exact match near the upstream aligner’s index (cheap substring search).
-  * **Phase‑2**: local alignment with Parasail’s striped SW (robust fallback).
+  * **Stage 1 — OOP phasing (**`** / **`**)**: consumes R1/R2 FASTQ (gz OK), detects repeats, and writes a gzipped FASTQ of **double‑consensus** sequences plus a gzipped **metadata** file.
+  * **Stage 2 — Refinement (**\`\`**)**: consumes the external aligner’s BAM and places a **single consensus** onto the reference with Phase‑1 exact and Phase‑2 Parasail fallback.
 * **Reference‑oriented consensus**: output consensus is reported 5′→3′ in the same orientation as the reference transcript.
 * **Minimal yet rich BAM tags**: `PH`, `BP`, `CL`, `MT`, `CH`, `RC` (and optional `NM`, `MM`). See `/docs/TAGS.md`.
 * **Simple CIGAR** by default (all `M`) to keep IO fast; detailed alignment strength captured in tags.
@@ -53,11 +53,28 @@ pip install pysam biopython parasail numpy tqdm
 
 ## Quick start
 
-```bash
-# Refine an upstream BAM against a transcript FASTA
-python refiner_v4.py input.bam transcripts.fasta -o refined -n 200000
+### Stage 1 — Build double‑consensus FASTQ (OOP pipeline)
 
-# Inspect a few records
+```bash
+# R1/R2 can be .fastq or .fastq.gz
+python main.py R1.fastq.gz R2.fastq.gz \
+  --fastq-out outputs/output.fastq.gz \
+  --meta-out  outputs/metadata.txt.gz \
+  -n 200000 --progress
+```
+
+This writes:
+
+* `outputs/output.fastq.gz` — FASTQ of **double‑consensus** sequences
+* `outputs/metadata.txt.gz` — per‑read metadata (read id, consensus length `d`, phase shift `phi`)
+
+### Stage 2 — Align externally, then refine
+
+1. **Align** the Stage‑1 FASTQ with your tool of choice (e.g., **Kalipso/Kallisto** — not bundled here). You are responsible for installing/running it.
+2. **Refine** with this repo using the aligner’s BAM plus your transcript FASTA:
+
+```bash
+python refiner_v4.py aligner_output.bam transcripts.fasta -o refined -n 200000
 samtools view refined.bam | head -n 3
 ```
 
@@ -65,23 +82,37 @@ samtools view refined.bam | head -n 3
 
 ## Inputs
 
-* **BAM**: upstream alignments (e.g., kallisto output). Secondary/supplementary reads are skipped.
-* **FASTA**: transcriptome/reference; sequence IDs must match `read.reference_name` values from the BAM.
+### Stage 1 (OOP phasing)
+
+* **R1 FASTQ** and **R2 FASTQ** (gzip accepted). These are the left/right RCA tails per read id.
+* Outputs a gz FASTQ of **double consensus** and a gz metadata file.
+
+### Stage 2 (Refinement)
+
+* **BAM**: output from your external aligner (e.g., Kalipso/Kallisto) run **against the Stage‑1 FASTQ**. Secondary/supplementary reads are skipped.
+* **FASTA**: transcriptome/reference; sequence IDs must match `reference_name` values in the BAM.
 
 Assumptions:
 
-* Each read’s query sequence in the input BAM contains a **double consensus** (single consensus repeated twice).
-* The upstream aligner provides a starting index that’s near the true placement (used to anchor Phase‑1 search).
+* Each input read for Stage‑2 contains a **double consensus** in its query sequence.
+* The aligner’s reported start index is near the true placement (used to anchor Phase‑1 search).
 
 ---
 
 ## How it works
 
-1. **Load references** (`SeqIO.to_dict`).
-2. **Iterate reads** (primary alignments only). Compute counters and timing.
-3. **Phase‑1 (exact)**: for `phi ∈ [0..d]`, try `ref.find(dc[phi:phi+d], kallisto_index)`. On success, crop to single consensus, slice qualities, and write BAM with `PH=1`.
-4. **Phase‑2 (SW fallback)**: run `parasail.sw_trace_striped_16(dc, ref)`. Use `beg_ref` and `beg_query:end_query` to crop single consensus. Optionally compute matches/mismatches from traceback and write `PH=2`.
-5. **Failure**: mark read unmapped (`PH=4`).
+### Stage 1 — OOP repeat phasing (see `main.py`, `oop_pipeline.py`)
+
+1. Read paired FASTQs (R1/R2) and, per read id, detect periodic repeats.
+2. Build a **double‑consensus** sequence (single consensus repeated twice) and compute metadata (`phi`, `d`).
+3. Write `outputs/output.fastq.gz` (double consensus as FASTQ) and `outputs/metadata.txt.gz`.
+
+### Stage 2 — Refinement (see `refiner_v4.py`)
+
+1. Load the transcript FASTA and iterate primary alignments from the external aligner’s BAM.
+2. **Phase‑1 (exact)**: for `phi ∈ [0..d]`, attempt `ref.find(dc[phi:phi+d], start_index)` near the aligner’s index. On success, crop single consensus, slice qualities, write BAM (`PH=1`).
+3. **Phase‑2 (SW fallback)**: run `parasail.sw_trace_striped_16(dc, ref)`. Use `beg_ref` and `beg_query:end_query` to crop single consensus; optionally compute matches/mismatches (`MT`, `NM`, `MM`). Write BAM (`PH=2`).
+4. On failure to place, mark unmapped (`PH=4`).
 
 See `/docs/ARCHITECTURE.md` for data flow and invariants.
 
@@ -89,42 +120,54 @@ See `/docs/ARCHITECTURE.md` for data flow and invariants.
 
 ## CLI
 
+### Stage 1 — `main.py`
+
 ```bash
-python refiner_v4.py <input.bam> <reference.fasta> [options]
+python main.py <R1.fastq[.gz]> <R2.fastq[.gz]> [options]
+
+Options:
+  --fastq-out   Path to gz FASTQ with double‑consensus (default: outputs/output.fastq.gz)
+  --meta-out    Path to gz metadata (default: outputs/metadata.txt.gz)
+  -n, --max-reads    Limit pairs processed (testing)
+  -s, --sample-size  Pairs to sample for orientation (default: 10000)
+  --progress         Live progress (pairs/s)
+  --quiet            Disable per‑read output
+  --max-errors INT   Max allowed errors in repeat detection (default: 2)
+  --k INT            k‑mer length for repeat detection/alignment (default: 25)
+```
+
+Refer to `main.py` for the full list and defaults.
+
+### Stage 2 — `refiner_v4.py`
+
+```bash
+python refiner_v4.py <aligner_output.bam> <reference.fasta> [options]
 
 Options:
   -o, --output_prefix  Output prefix (default: refined) → writes <prefix>.bam
-  -n, --max_reads      Limit number of reads processed (for testing)
-```
-
-**Example**
-
-```bash
-python refiner_v4.py kallisto.bam transcripts.fasta -o yeast_refined -n 100000
+  -n, --max_reads      Limit number of reads processed (testing)
 ```
 
 ---
 
 ## Output & tags
 
+### Stage 1 (OOP phasing)
+
+* `outputs/output.fastq.gz` — FASTQ with **double‑consensus** sequences.
+* `outputs/metadata.txt.gz` — Gzipped TSV: `<read_id>	<phi>	<d>` (plus any additional fields you add).
+
+### Stage 2 (Refinement)
+
 The pipeline writes at most one refined alignment per primary input read.
 
 * **Placed via Phase‑1**: `PH=1`, `BP` set, `CL=d`, `RC` from original FLAG.
-* **Placed via Phase‑2**: `PH=2`, `BP` from `beg_query`; `MT` provides alignment strength (see below). Optional: `NM` (edit distance), `MM` (mismatches only).
+* **Placed via Phase‑2**: `PH=2`, `BP` from `beg_query`; `MT` provides alignment strength (see `/docs/TAGS.md`). Optional: `NM` (edit distance), `MM` (mismatches only).
 * **Unplaced**: `PH=4`, record marked unmapped.
 
 **Default CIGAR policy**: we emit `M`‑only with length `len(single_consensus)`. Indels are not represented in CIGAR; use `MT`/`NM` for accuracy.
 
-**Key tags** (see `/docs/TAGS.md` for the full legend):
-
-* `PH` — phase (1 exact, 2 SW, 4 unmapped)
-* `BP` — phi offset used to crop single consensus from the double
-* `CL` — intended single‑consensus length (`d`)
-* `MT` — matches for the placed segment (query span by default; can be true matches if using traceback)
-* `CH` — chimera heuristic: `(CL − MT)/CL > 0.05` → `1` else `0`
-* `RC` — original orientation from input FLAG (1 reverse, 0 forward)
-* `NM` (optional) — SAM edit distance (`mismatches + insertions + deletions`)
-* `MM` (optional) — mismatches only (from traceback)
+Key tags are summarized in `/docs/TAGS.md`.
 
 ---
 
@@ -140,7 +183,8 @@ Rationales and trade‑offs are captured in `/docs/DECISIONS.md`.
 
 ## Performance
 
-* Phase‑1 is O(d) on the double consensus and typically dominates throughput when successful.
+* Stage 1 is linear in read length and fast; tune `k`, `sample_size`, and `max_errors` for your data.
+* Phase‑1 in Stage 2 is O(d) on the double consensus and typically dominates throughput when successful.
 * Phase‑2 uses Parasail’s striped vectors (SIMD). Consider reducing Phase‑2 frequency by improving Phase‑1 anchoring.
 * The CLI prints: load time, per‑phase totals, total runtime, reads/second (counts **all reads touched**, including discarded), and chimera/reversal counts.
 
@@ -154,8 +198,9 @@ Tips:
 ## Repo structure
 
 ```
-refiner_v4.py         # Main pipeline (Phase‑1/Phase‑2, tag writing, timing)
-oop_pipeline.py       # OOP utilities / prior components
+main.py               # CLI entrypoint for Stage 1 (OOP phasing)
+oop_pipeline.py       # OOP repeat phasing logic (consider rename to rca_phasing.py)
+refiner_v4.py         # Stage 2 refinement (Phase‑1/Phase‑2, tag writing, timing)
 /docs/                # Human docs
   TAGS.md            # BAM tag legend
   ARCHITECTURE.md    # Data flow, invariants, conventions
@@ -184,7 +229,7 @@ See `/docs/TESTING.md` for unit and golden end‑to‑end guidance.
 
 ## Troubleshooting
 
-* **`ModuleNotFoundError: parasail`** — install with `pip install parasail`; if wheels aren’t available, build from source.
+* \`\` — install with `pip install parasail`; if wheels aren’t available, build from source.
 * **No placements / many PH=4** — check that `reference_name` values in BAM match FASTA IDs.
 * **Windows shell issues** — prefer WSL or Git Bash; for grepping in `.gz` files on Windows PowerShell use: `gzip -dc file.fastq.gz | findstr "pattern"`.
 * **Unexpected CIGAR/CL** — by design CIGAR is `M`‑only; rely on `MT`/`NM` for alignment strength.
