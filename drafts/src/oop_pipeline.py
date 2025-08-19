@@ -3,6 +3,9 @@
 The classes defined here break the repeat phasing logic into small reusable
 components.  They are used by ``main.py`` to process paired-end FASTQ files and
 produce phased consensus reads.
+
+Virtual Environment at ~/venvs/tr-errors/bin/activate
+
 """
 
 import gzip

@@ -248,6 +248,14 @@ See `/docs/TESTING.md` for unit and golden end‑to‑end guidance.
 
 ---
 
+## References
+
+* Illumina Quality Scores: https://www.drive5.com/usearch/manual/quality_score.html
+* Understanding Illumina Quality Scores: https://www.illumina.com/content/dam/illumina-marketing/documents/products/technotes/technote_understanding_quality_scores.pdf
+* Kallisto: https://pachterlab.github.io/kallisto/about
+
+---
+
 ## License
 
 MIT (or your preferred license). Add a `LICENSE` file at repo root.

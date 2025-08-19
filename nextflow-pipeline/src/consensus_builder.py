@@ -16,7 +16,7 @@ Usage:
 import sys
 import argparse
 from time import perf_counter
-from oop_pipeline import RepeatPhasingPipeline
+from consensus_pipeline import RepeatPhasingPipeline
 from tqdm import tqdm
 
 
