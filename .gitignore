@@ -9,3 +9,6 @@ drafts/local_archive/
 *.sam
 *.csv
 *gff3
+*.fa
+*.idx
+*.gz
