@@ -21,7 +21,7 @@ Refine Rolling Circle Amplification (RCA) read alignments in **three stages**:
 
 ## Features
 * **Reference‑oriented output**: consensus is written 5′→3′ in the reference orientation; original input orientation is preserved in `RC`.
-* **Informative BAM tags**: `PH`, `BP`, `CL`, `MT`, `CH`, `RC` (and optional `NM`, `MM`). See `/docs/TAGS.md`.
+* **Informative BAM tags**: `PH`, `BP`, `CL`, `MT`, `CH`, `RC` (and optional `NM`, `MM`). See `/docs/HOW-IT-WORKS.md`.
 * **Simple CIGAR** by default (all `M`); alignment strength captured in tags.
 * **Run metrics**: total time, per‑phase time, reads/s (all reads touched), chimera/discard counts.
 
@@ -39,7 +39,7 @@ Please see [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main
 * **consensus\_builder.py** → Command-line interface for running the pipeline on FASTQ inputs.
 * **refiner.py** → Refines double consensus alignments vs reference using exact-match and Smith–Waterman fallback.
 
-Detailed descriptions of how each module works are in [`HOW_IT_WORKS.md`](/docs/HOW_IT_WORKS.md).
+Detailed descriptions of how each module works are in [`HOW-IT-WORKS.md`](/docs/HOW-IT-WORKS.md).
 
 ---
 
