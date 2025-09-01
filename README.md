@@ -39,7 +39,7 @@ Please see [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main
 * **consensus\_builder.py** → Command-line interface for running the pipeline on FASTQ inputs.
 * **refiner.py** → Refines double consensus alignments vs reference using exact-match and Smith–Waterman fallback.
 
-Detailed descriptions of how each module works are in [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md).
+Detailed descriptions of how each module works are in [`HOW_IT_WORKS.md`](/docs/HOW_IT_WORKS.md).
 
 ---
 
