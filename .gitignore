@@ -1,8 +1,14 @@
 /reads/
+drafts/reads/
 /local_archive/
+drafts/local_archive/
 *output*.*
 *pyc
 *metadata*
 *.bam
 *.sam
 *.csv
+*gff3
+*.fa
+*.idx
+*.gz

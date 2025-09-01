@@ -7,6 +7,7 @@ from Bio.Seq import Seq
 from collections import defaultdict
 import edlib
 import re
+import parasail
 
 def fuzzy_aligner():
     # Example DNA sequences
@@ -57,8 +58,45 @@ def test():
 
     print(f"phase: {2}\nref_start: {ref_start}\nis_reverse: {False}\nphi: {query_start}\nconsensus_length: {consensus_length}\nsingle_consensus: {double_consensus[query_start: query_start + consensus_length]}\nnum_matches: {matches}")
 
+def test_parasail():
+    ref = "ATGAATCCTCAAGTCAGTAACATCATCATCATGTTGGTCATGATGCAACTCTCCCGTCGCATTGACATGGAGGACCCAACCATCATCATGTACATTAGAATTTTATACTGTTCTTCCATCGGTATCTCTTGGATCATCTACCAAATGGCCAGAAAGAGAATTGTTGCTAAAAACGACATGACTACCATGAAGTACGTCGAACCTGGTAATGCTATGTCCGGCGAAGGTGAGAAGCTGCAAGTTACTACCGTCAGAGACTACGATTTGAAGGAAATAGACAGTGCTATCAAGTCTATCTACACTGGTATGGCTATGATGGGTTTCATGCATTTGTACTTGAAATACACCAACCCATTGTTCATGCAATCCATTTCTCCAGTGAAAAGCGCTTTGGAACACAACGAAGTGAAAATTCACCTCTTCGGTAAGCCTGCAACCGGCGATTTGAAGAGACCATTCAAGGCTCCATCTTTGTTTGGTGGTATGGGTCAAACTGGTCCAAAGACCGACAAGAAATCTATCGAAGAAGCTGAAAGAGCCGGTAACGCTGGTGTTAAGGCTGAATGA"
+    dc = "CTTGGATCATCTACCAAATGGCCAGAAAGAGAATTGTTGCTAAAAACGACATGACTACCATGAAGTACGTCGAACCTGGTAATGCTATGTCCGGCGAAGGTGAGAAGCTGCAAGTTACCAACGTCAGGCACTACGAATTAAAGGAAATAGACACCCGTAAGAAATCTCTCTACAATGGAAAGACAATGAGCGGTCTCATAATGCAGCACCGGTATCGCTTGGATCATCTACCAAATGGCCAGAAAGAGAATTGTTGCTAAAAACGACATGACTACCATGAAGTACGTCGAACCTGGTAATGCTATGTCCGGCGAAGGTGAGAAGCTGCAAGTTACCAACGTCAGGCACTACGAATTAAAGGAAATAGACACCCGTAAGAAATCTCTCTACAATGGAAAGACAATGAGCGGTCTCATAATGCAGCACCGGTATCG"
+    
+    matrix = parasail.matrix_create("ACGT", 10, -20)
+
+    # Perform local (Smith–Waterman) with striped vectors, 16-bit
+    result = parasail.sw_trace_striped_16(dc, ref, 200, 10, matrix)
+
+    # Extract the aligned strings
+    aligned_ref   = result.traceback.ref
+    aligned_query = result.traceback.query
+
+    # Build the visual match line
+    match_line = ''.join(
+        '|' if r == q else ' '
+        for r, q in zip(aligned_ref, aligned_query)
+    )
+
+    # Pull out start/end positions
+    start_ref   = result.cigar.beg_ref    # CIGAR start on reference :contentReference[oaicite:2]{index=2}
+    end_ref     = result.end_ref          # CIGAR end on reference :contentReference[oaicite:3]{index=3}
+    start_query = result.cigar.beg_query  # CIGAR start on query :contentReference[oaicite:4]{index=4}
+    end_query   = result.end_query        # CIGAR end on query :contentReference[oaicite:5]{index=5}
+
+    # Print summary
+    print(f"Alignment score: {result.score}")
+    print(f"Reference aligned from index {start_ref} to {end_ref}")
+    print(f"Query     aligned from index {start_query} to {end_query}\n")
+
+    # Print the alignment
+    print("Alignment:")
+    print(aligned_ref)
+    print(match_line)
+    print(aligned_query)
+
+
 def main():
-    test()
+    test_parasail()
 
 if __name__ == "__main__":
     main()

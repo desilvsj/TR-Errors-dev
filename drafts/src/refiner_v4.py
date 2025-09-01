@@ -6,9 +6,27 @@ from typing import Tuple, Optional
 import argparse
 from Bio import Align
 import time
+import re
+"""
+Parasail Library
+Daily, Jeff. (2016). Parasail: SIMD C library for global, semi-global, and local pairwise sequence alignments. BMC Bioinformatics, 17(1), 1-11. doi:10.1186/s12859-016-0930-z
+http://dx.doi.org/10.1186/s12859-016-0930-z
+"""
+import parasail
+
+class Read:
+    def __init__(self):
+        self.phase = 0
+        self.ref_start = None
+        self.phi = None
+        self.consensus_length = None
+        self.consensus_type = "double" #either single or double
+        self.match_count = None
+        self.sequence = None
+        self.match_len = None
+
 
 def parse_edlib_cigar(cigar: str):
-    import re
     if not cigar:
         return []
     ops = {'M': 0, 'I': 1, 'D': 2}
@@ -18,32 +36,27 @@ def sort_bam_by_reference_name(bam_path: str, sorted_bam_path: str):
     pysam.sort("-o", sorted_bam_path, "-n", bam_path)
     return sorted_bam_path
 
-def crop_double_consensus(dc: str, phi: int, d: int, reverse: bool) -> str:
+def crop_double_consensus(dc: str, phi: int, d: int) -> str:
     seq = dc[phi:phi + d]
-    return str(Seq(seq).reverse_complement()) if reverse else seq
+    return seq
 
 def find_exact_consensus_match(ref_seq: str, double_consensus: str, kallisto_index: int) -> Tuple[Optional[int], Optional[bool], Optional[int]]:
     d = len(double_consensus) // 2
     for phi in range(d + 1):
         candidate = double_consensus[phi:phi + d]
-        rc_candidate = str(Seq(candidate).reverse_complement())
         pos = ref_seq.find(candidate, kallisto_index)
         if pos != -1:
-            return pos, False, phi
-        pos_rc = ref_seq.find(rc_candidate, kallisto_index)
-        if pos_rc != -1:
-            return pos_rc, True, phi
-    return None, None, None
+            return pos, phi
+    return None, None
 
 def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
-    match_pos, is_rev, phi = find_exact_consensus_match(ref_seq, double_consensus, kallisto_index)
+    match_pos, phi = find_exact_consensus_match(ref_seq, double_consensus, kallisto_index)
     if match_pos is not None:
         d = len(double_consensus) // 2
-        cropped = crop_double_consensus(double_consensus, phi, d, is_rev)
+        cropped = crop_double_consensus(double_consensus, phi, d)
         return {
             "phase": 1,
             "ref_start": match_pos,
-            "is_reverse": is_rev,
             "phi": phi,
             "consensus_length": d,
             "single_consensus": cropped,
@@ -51,29 +64,47 @@ def run_phase1(ref_seq: str, double_consensus: str, kallisto_index: int):
         }
     return None
 
-def run_phase2(ref_seq: str, double_consensus: str, consensus_length: int):
-    aligner = Align.PairwiseAligner()
-    aligner.mode = "local"
-    aligner.match_score = 2
-    aligner.mismatch_score = -10
-    aligner.open_gap_score = -100
-    aligner.extend_gap_score = -20
 
-    alignments = aligner.align(ref_seq, double_consensus)
-    best = alignments[0]
-    ref_start = best.aligned[0][0][0]
-    query_start = int(best.aligned[1][0][0])
-    query_end = int(best.aligned[1][-1][1])
-    matches = query_end - query_start
+def run_phase2_parasail(ref_seq: str, double_consensus: str, consensus_length: int):
+    matrix = parasail.matrix_create("ACGT", 10, -20)
+
+    # Perform local (Smith–Waterman) with striped vectors, 16-bit
+    result = parasail.sw_trace_striped_16(double_consensus, ref_seq, 200, 10, matrix)
+
+    # Extract the aligned strings
+    # aligned_ref   = result.traceback.ref
+    # aligned_query = result.traceback.query
+
+    start_ref   = result.cigar.beg_ref    # CIGAR start on reference :contentReference[oaicite:2]{index=2}
+    end_ref     = result.end_ref          # CIGAR end on reference :contentReference[oaicite:3]{index=3}
+    start_query = result.cigar.beg_query  # CIGAR start on query :contentReference[oaicite:4]{index=4}
+    end_query   = result.end_query        # CIGAR end on query :contentReference[oaicite:5]{index=5}
+
+    matches = end_query - start_query
+
+        # --- NEW: compute matches/mismatches/indels from traceback ---
+    aln_ref  = result.traceback.ref
+    aln_qry  = result.traceback.query
+    mt = mm = ins = dels = 0
+    for r, q in zip(aln_ref, aln_qry):
+        if r != '-' and q != '-':
+            if r == q: mt += 1
+            else:      mm += 1
+        elif r == '-' and q != '-':
+            ins += 1
+        elif r != '-' and q == '-':
+            dels += 1
+    nm = mm + ins + dels  # SAM-standard edit distance
 
     return {
         "phase": 2,
-        "ref_start": ref_start,
+        "ref_start": start_ref,
         "is_reverse": False,
-        "phi": query_start,
+        "phi": start_query,
         "consensus_length": consensus_length,
-        "single_consensus": double_consensus[query_start: query_start + consensus_length],
-        "num_matches": matches
+        "single_consensus": double_consensus[start_query:end_query],
+        "num_matches": matches,
+        "num_mismatches": nm
     }
 
 def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_reads: Optional[int] = None):
@@ -85,15 +116,24 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
     outfile = pysam.AlignmentFile(output_bam_path, "wb", template=bamfile)
 
     results = []
-    count = 0
+    processed_count = 0
     chimera_count = 0
+    discard_count = 0
+    total_touched = 0
+    reversed_count = 0
 
     t0 = time.time()
     t_phase1 = 0
     t_phase2 = 0
 
     for read in bamfile.fetch(until_eof=True):
-        if max_reads is not None and count >= max_reads:
+        total_touched += 1
+        # Filter to primary alignments only
+        if read.is_secondary or read.is_supplementary:
+            discard_count += 1
+            continue
+
+        if max_reads is not None and processed_count >= max_reads:
             break
         if read.is_unmapped or read.reference_name not in ref_dict:
             continue
@@ -101,6 +141,13 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
         ref_seq = str(ref_dict[read.reference_name].seq)
         dc = read.query_sequence
         kidx = read.reference_start
+        reversal_stat = False
+
+        if read.is_reverse:
+            # ref_seq = Seq(ref_seq).reverse_complement()
+            reversal_stat = True
+            reversed_count+=1
+
 
         t1_start = time.time()
         phase1_result = run_phase1(ref_seq, dc, kidx)
@@ -109,9 +156,8 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
         if phase1_result:
             d = phase1_result["consensus_length"]
             phi = phase1_result["phi"]
-            is_rev = phase1_result["is_reverse"]
             new_seq = phase1_result["single_consensus"]
-
+            is_rev = reversal_stat
             read.reference_start = phase1_result["ref_start"]
             read.query_sequence = new_seq
             try:
@@ -125,15 +171,16 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
 
             read.set_tag("PH", 1)
             read.set_tag("BP", phi)
-            read.set_tag("ST", "-" if is_rev else "A")
+            # read.set_tag("ST", "-" if is_rev else "A")
             read.set_tag("CL", d)
+            read.set_tag("RC", reversal_stat)
             results.append(phase1_result)
             outfile.write(read)
 
         else:
             d = len(dc) // 2
             t2_start = time.time()
-            phase2_result = run_phase2(ref_seq, dc, d)
+            phase2_result = run_phase2_parasail(ref_seq, dc, d)
             t_phase2 += time.time() - t2_start
 
             if phase2_result["ref_start"] is not None:
@@ -142,6 +189,7 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 is_rev = phase2_result["is_reverse"]
                 new_seq = phase2_result["single_consensus"]
                 matches = phase2_result["num_matches"]
+                nm = phase2_result["num_mismatches"]
 
                 read.reference_start = phase2_result["ref_start"]
                 read.query_sequence = new_seq
@@ -160,34 +208,39 @@ def refiner_pipeline(bam_path: str, fasta_path: str, output_bam_path: str, max_r
                 read.cigartuples = [(0, len(new_seq))]
                 read.is_unmapped = False
                 read.is_reverse = is_rev
-                read.set_tag("PH", 3)
+                read.set_tag("PH", 2)
                 read.set_tag("BP", phi)
-                read.set_tag("ST", "-" if is_rev else "A")
+                # read.set_tag("ST", "-" if is_rev else "A")
                 read.set_tag("CL", d)
                 read.set_tag("MT", matches)
+                read.set_tag("NM", nm)
                 read.set_tag("CH", chimera)
+                read.set_tag("RC", reversal_stat)
 
             else:
                 read.is_unmapped = True
-                read.set_tag("PH", 4)
+                read.set_tag("PH", 3)
 
             results.append(phase2_result)
             outfile.write(read)
 
-        count += 1
+        processed_count += 1
 
     bamfile.close()
     outfile.close()
 
     total_time = time.time() - t0
-    rps = count / total_time if total_time > 0 else 0
+    rps = total_touched / total_time if total_time > 0 else 0
 
     print(f"Time to load fasta: {t_load_end - t_load_start:.2f}s")
     print(f"Chimeras detected: {chimera_count}")
+    print(f"Reversed Reads: {reversed_count}")
+    print(f"Reads discarded (non-primary): {discard_count}")
+    print(f"Total reads touched: {total_touched}")
     print(f"Total time: {total_time:.2f}s")
     print(f" - Phase 1 total time: {t_phase1:.2f}s")
     print(f" - Phase 2 total time: {t_phase2:.2f}s")
-    print(f" - Reads per second: {rps:.2f}")
+    print(f" - Reads per second (all reads): {rps:.2f}")
 
     return results
 
@@ -202,8 +255,8 @@ def main():
     output_bam_path = f"{args.output_prefix}.bam"
     results = refiner_pipeline(args.bam, args.fasta, output_bam_path, max_reads=args.max_reads)
 
-    phase1_count = sum(1 for r in results if r["phase"] == 1)
-    phase2_count = sum(1 for r in results if r["phase"] == 2)
+    phase1_count = sum(1 for r in results if r and r.get("phase") == 1)
+    phase2_count = sum(1 for r in results if r and r.get("phase") == 2)
 
     print(f"Pipeline complete: {len(results)} reads processed.")
     print(f" - Phase 1 successful: {phase1_count}")
