@@ -1,43 +1,45 @@
-# TR‑Errors Pipeline
+# TR‑Errors-dev
 
-Refine Rolling Circle Amplification (RCA) read alignments in **two stages**:
+## Overview
+This project develops a modernized pipeline to detect transcription errors from Rolling Circle Amplification (RCA) sequencing data. Transcription errors occur far less frequently than sequencing errors, making them difficult to identify with standard methods. RCA generates tandem repeats of the same RNA molecule, allowing sequencing noise to be averaged out and the true consensus sequence to be recovered.
 
-* **Stage 1 — Consensus Builder**: take paired R1/R2 FASTQ (\*.fastq or \*.fastq.gz), detect repeats, and emit a gzipped FASTQ of **double‑consensus** reads plus a gzipped **metadata** file.
-* **Stage 2 — Alignment Refinement**: after you align the Stage‑1 FASTQ with your external tool (e.g., **Kallisto**) to produce a BAM, refine those placements by cropping to a **single consensus** via a fast exact search (Phase‑1) with a SIMD‑accelerated Smith–Waterman fallback (Phase‑2 via Parasail).
+The pipeline takes paired-end RCA reads, builds a consensus verified across both R1 and R2, and produces a “double consensus” sequence for mapping. Using kallisto, these sequences are pseudoaligned to a reference, then refined to locate the exact consensus window and its true placement. The final goal is to return precise genomic or transcriptomic positions where transcription errors can be confidently identified. For further explanation, please refer [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main/docs/HOW-IT-WORKS.md).
 
-> The external alignment step is **not** bundled here; you install/run it yourself. See `main.py` for Stage‑1 arguments.
+This repository contains the development implementation of the Transcription (TR) Error Pipeline. Unlike the companion Nextflow repo [(TR-Errors-Pipeline)](https://github.com/desilvsj/TR-Errors-Pipeline), which provides a production-ready workflow, this repo hosts the raw Python scripts, prototypes, and experimental modules. This repository can be used to explore how the core algorithms work, run modules directly, and test out new ideas before integration into the formal pipeline.
 
 ---
 
-## Table of contents
+Refine Rolling Circle Amplification (RCA) read alignments in **three stages**:
 
-* [Features](#features)
-* [Install](#install)
-* [Quick start](#quick-start)
-* [Inputs](#inputs)
-* [How it works](#how-it-works)
-* [CLI](#cli)
-* [Output & tags](#output--tags)
-* [Design choices](#design-choices)
-* [Performance](#performance)
-* [Repo structure](#repo-structure)
-* [Testing](#testing)
-* [Troubleshooting](#troubleshooting)
-* [Citations](#citations)
-* [License](#license)
+* **Stage 1 — Consensus Builder**: take paired R1/R2 FASTQ (\*.fastq or \*.fastq.gz), detect repeats, and emit a gzipped FASTQ of **double‑consensus** reads plus a gzipped **metadata** file.
+* **Step 2 — Alignment (Kallisto)**: map the Step-1 FASTQ using Kallisto to produce a BAM of pseudoalignments.
+* **Stage 3 — Alignment Refinement**: refine those placements by cropping to a **single consensus** via a fast exact search (Phase‑1) with a SIMD‑accelerated Smith–Waterman fallback (Phase‑2 via Parasail).
+
+> The external alignment (Step 2) is **not** bundled here; you install/run it yourself. See `main.py` for Stage‑1 arguments.
 
 ---
 
 ## Features
-
-* **Two‑stage flow**
-
-  * **Stage 1 — Consensus Builder (`main.py` / `oop_pipeline.py`)**: consumes R1/R2 FASTQ (gz OK), computes per‑read periodicity, and writes a gz FASTQ of **double‑consensus** sequences plus gz **metadata**.
-  * **Stage 2 — Alignment Refinement (`refiner_v4.py`)**: consumes the external aligner’s BAM and places a **single consensus** onto the reference with Phase‑1 exact and Phase‑2 Parasail fallback.
 * **Reference‑oriented output**: consensus is written 5′→3′ in the reference orientation; original input orientation is preserved in `RC`.
 * **Informative BAM tags**: `PH`, `BP`, `CL`, `MT`, `CH`, `RC` (and optional `NM`, `MM`). See `/docs/TAGS.md`.
 * **Simple CIGAR** by default (all `M`); alignment strength captured in tags.
 * **Run metrics**: total time, per‑phase time, reads/s (all reads touched), chimera/discard counts.
+
+---
+
+## How it works
+
+Please see [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main/docs/HOW-IT-WORKS.md) for a complete breakdown of the process.
+
+---
+
+## Modules at a Glance
+
+* **consensus\_pipeline.py** → Builds consensus from R1/R2, determines repeat unit, orientation, and produces a double consensus.
+* **consensus\_builder.py** → Command-line interface for running the pipeline on FASTQ inputs.
+* **refiner.py** → Refines double consensus alignments vs reference using exact-match and Smith–Waterman fallback.
+
+Detailed descriptions of how each module works are in [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md).
 
 ---
 
@@ -56,80 +58,59 @@ pip install pysam biopython parasail numpy tqdm
 
 ---
 
-## Quick start
 
-### Stage 1 — Consensus Builder
+## Quickstart
 
-```bash
-# R1/R2 can be .fastq or .fastq.gz
-python main.py R1.fastq.gz R2.fastq.gz \
-  --fastq-out outputs/output.fastq.gz \
-  --meta-out  outputs/metadata.txt.gz \
-  -n 200000 --progress
-```
+### Prerequisites
 
-This writes:
+* Python 3.10+
+* Conda or pip/uv for environment management
+* Recommended packages listed in `requirements.txt`
 
-* `outputs/output.fastq.gz` — FASTQ of **double‑consensus** sequences
-* `outputs/metadata.txt.gz` — per‑read metadata (read id, consensus length `d`, phase shift `phi`)
-
-### External aligner (you run this)
-
-Align the Stage‑1 FASTQ with your tool of choice (e.g., **Kallisto**) to produce `aligner_output.bam`.
-
-### Stage 2 — Alignment Refinement
+### Setup
 
 ```bash
-python refiner_v4.py aligner_output.bam transcripts.fasta -o refined -n 200000
-samtools view refined.bam | head -n 3
+# Clone repo
+git clone <repo-url>
+cd <repo-name>
+
+# Create environment (example with conda)
+conda create -n rca-dev python=3.10
+conda activate rca-dev
+pip install -r requirements.txt
 ```
 
----
+### Running the Code
 
-## Inputs
+* **Consensus Builder** (Step 1):
 
-### Stage 1 — Consensus Builder
+```bash
+python consensus_builder.py R1.fastq.gz R2.fastq.gz \
+    --fastq-out outputs/output.fastq.gz \
+    --meta-out outputs/metadata.txt.gz \
+    -n 1000
+```
 
-* **R1 FASTQ** and **R2 FASTQ** (gzip accepted). These are the left/right RCA tails per read id.
-* Outputs a gz FASTQ of **double consensus** and a gz metadata file.
+* **Refiner** (Step 3, after Kallisto):
 
-### Stage 2 — Alignment Refinement
+```bash
+python refiner.py pseudoalignments.bam reference.fa -o refined
+```
 
-* **BAM**: output from your external aligner run **against the Stage‑1 FASTQ**. Secondary/supplementary reads are skipped.
-* **FASTA**: transcriptome/reference; sequence IDs must match `reference_name` values in the BAM.
+Outputs include:
 
-Assumptions:
-
-* Each Stage‑2 input read contains a **double consensus** in its query sequence.
-* The aligner’s reported start index is near the true placement (used to anchor Phase‑1 search).
-
----
-
-## How it works
-
-### Stage 1 — Consensus Builder (see `main.py`, `oop_pipeline.py`)
-
-1. Read paired FASTQs (R1/R2) and, per read id, detect periodic repeats.
-2. Build a **double‑consensus** sequence (single consensus repeated twice) and compute metadata (`phi`, `d`).
-3. Write `outputs/output.fastq.gz` (double consensus as FASTQ) and `outputs/metadata.txt.gz`.
-
-### Stage 2 — Alignment Refinement (see `refiner_v4.py`)
-
-1. Load the transcript FASTA and iterate primary alignments from the external aligner’s BAM.
-2. **Phase‑1 (exact)**: for `phi ∈ [0..d]`, attempt `ref.find(dc[phi:phi+d], start_index)` near the aligner’s index. On success, crop single consensus, slice qualities, write BAM (`PH=1`).
-3. **Phase‑2 (SW fallback)**: run `parasail.sw_trace_striped_16(dc, ref)`. Use `beg_ref` and `beg_query:end_query` to crop single consensus; optionally compute matches/mismatches (`MT`, `NM`, `MM`). Write BAM (`PH=2`).
-4. On failure to place, mark unmapped (`PH=4`).
-
-See `/docs/ARCHITECTURE.md` for data flow and invariants.
+* Double consensus FASTQ (`output.fastq.gz`)
+* Metadata with consensus length + phase shift (`metadata.txt.gz`)
+* Refined BAM (`refined.bam`)
 
 ---
 
 ## CLI
 
-### Stage 1 — `main.py`
+### Step 1 — `consensus_builder.py`
 
 ```bash
-python main.py <R1.fastq[.gz]> <R2.fastq[.gz]> [options]
+python consensus_builder.py <R1.fastq[.gz]> <R2.fastq[.gz]> [options]
 
 Options:
   --fastq-out   Path to gz FASTQ with double‑consensus (default: outputs/output.fastq.gz)
@@ -142,12 +123,12 @@ Options:
   --k INT            k‑mer length for repeat detection/alignment (default: 25)
 ```
 
-Refer to `main.py` for the full list and defaults.
+Refer to `consensus_builder.py` for the full list and defaults.
 
-### Stage 2 — `refiner_v4.py`
+### Step 3 — `refiner.py`
 
 ```bash
-python refiner_v4.py <aligner_output.bam> <reference.fasta> [options]
+python refiner.py <aligner_output.bam> <reference.fasta> [options]
 
 Options:
   -o, --output_prefix  Output prefix (default: refined) → writes <prefix>.bam
@@ -156,41 +137,66 @@ Options:
 
 ---
 
-## Output & tags
+## Inputs
 
-### Stage 1 — Consensus Builder
+### Step 1 — Consensus Builder
+
+* **R1 FASTQ** and **R2 FASTQ** (gzip accepted). These are the left/right RCA tails per read id.
+* Outputs a gz FASTQ of **double consensus** and a gz metadata file.
+
+### Step 2 — Alignment (Kallisto)
+
+* **Double consensus FASTQ**: output from Step‑1, aligned externally with **Kallisto** against your transcriptome/reference FASTA.
+* Produces a BAM of pseudoalignments to be passed to Step‑3.
+
+### Step 3 — Alignment Refinement
+
+* **BAM**: output from Kallisto run **against the Step‑1 FASTQ**. Secondary/supplementary reads are skipped.
+* **FASTA**: transcriptome/reference; sequence IDs must match `reference_name` values in the BAM.
+
+Assumptions:
+
+* Each Step‑3 input read contains a **double consensus** in its query sequence.
+* The aligner’s reported start index is near the true placement (used to anchor Phase‑1 search).
+
+---
+
+## Outputs & Tags
+
+### Step 1 — Consensus Builder
 
 * `outputs/output.fastq.gz` — FASTQ with **double‑consensus** sequences.
-* `outputs/metadata.txt.gz` — Gzipped TSV: `<read_id>	<phi>	<d>` (plus any additional fields you add).
+* `outputs/metadata.txt.gz` — Gzipped TSV: `<read_id>\t<phi>\t<d>` (plus any additional fields you add).
 
-### Stage 2 — Alignment Refinement
+### Step 3 — Alignment Refinement
 
 The pipeline writes at most one refined alignment per primary input read.
 
 * **Placed via Phase‑1**: `PH=1`, `BP` set, `CL=d`, `RC` from original FLAG.
-* **Placed via Phase‑2**: `PH=2`, `BP` from `beg_query`; `MT` provides alignment strength (see `/docs/TAGS.md`). Optional: `NM` (edit distance), `MM` (mismatches only).
+* **Placed via Phase‑2**: `PH=2`, `BP` from `beg_query`; `MT` provides alignment strength. Optional: `NM` (edit distance), `MM` (mismatches only).
 * **Unplaced**: `PH=4`, record marked unmapped.
 
 **Default CIGAR policy**: we emit `M`‑only with length `len(single_consensus)`. Indels are not represented in CIGAR; use `MT`/`NM` for accuracy.
 
-Key tags are summarized in `/docs/TAGS.md`.
+Key tags are summarized in `/docs/HOW-IT-WORKS`.
 
 ---
 
-## Design choices
+## Design choices & Notes
 
 * **Consensus orientation policy**: consensus is always written forward (reference orientation). Original orientation is preserved in `RC`.
 * **CIGAR simplification**: IO and compatibility first; tags carry finer alignment details.
 * **Chimera flag**: cheap but tunable threshold; adjust per dataset in code if needed.
-
-Rationales and trade‑offs are captured in `/docs/DECISIONS.md`.
+* Parameters like `k` (k-mer size), `max_errors`, and `sample_size` control sensitivity and performance.
+* Assumes paired-end RCA reads; orientation determined once per sample.
+* Refiner supports fallback alignment with Parasail when exact matches are not found.
 
 ---
 
 ## Performance
 
 * Stage 1 is linear in read length and fast; tune `k`, `sample_size`, and `max_errors` for your data.
-* Phase‑1 in Stage 2 is O(d) on the double consensus and typically dominates throughput when successful.
+* Phase‑1 in Stage 3 is O(d) on the double consensus and typically dominates throughput when successful.
 * Phase‑2 uses Parasail’s striped vectors (SIMD). Consider reducing Phase‑2 frequency by improving Phase‑1 anchoring.
 * The CLI prints: load time, per‑phase totals, total runtime, reads/second (counts **all reads touched**, including discarded), and chimera/reversal counts.
 
@@ -198,38 +204,6 @@ Tips:
 
 * Ensure Parasail installs with vectorization (SSE/AVX) on your machine.
 * Use `-n` during development to iterate quickly.
-
----
-
-## Repo structure
-
-```
-main.py               # CLI entrypoint for Stage 1 (Consensus Builder)
-oop_pipeline.py       # Repeat phasing logic used by Stage 1 (consider rename to rca_consensus_builder.py)
-refiner_v4.py         # Stage 2 (Alignment Refinement): Phase‑1/Phase‑2, tags, timing
-/docs/                # Human docs
-  TAGS.md            # BAM tag legend
-  ARCHITECTURE.md    # Data flow, invariants, conventions
-  USAGE.md           # CLI and examples
-  DECISIONS.md       # ADRs (design choices & trade‑offs)
-  LOGGING.md         # Logging conventions
-  CONTRIBUTING.md    # How to set up, style, and PR
-  STYLE.md           # Code/docstyle conventions
-  CHANGELOG.md       # Human‑readable history
-  TESTING.md         # Test strategy and fixtures (optional)
-```
-
----
-
-## Testing
-
-We recommend **pytest** with a tiny fixture FASTA/BAM pair.
-
-```bash
-pytest -q
-```
-
-See `/docs/TESTING.md` for unit and golden end‑to‑end guidance.
 
 ---
 
@@ -253,9 +227,3 @@ See `/docs/TESTING.md` for unit and golden end‑to‑end guidance.
 * Illumina Quality Scores: https://www.drive5.com/usearch/manual/quality_score.html
 * Understanding Illumina Quality Scores: https://www.illumina.com/content/dam/illumina-marketing/documents/products/technotes/technote_understanding_quality_scores.pdf
 * Kallisto: https://pachterlab.github.io/kallisto/about
-
----
-
-## License
-
-MIT (or your preferred license). Add a `LICENSE` file at repo root.
