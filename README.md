@@ -3,7 +3,7 @@
 ## Overview
 This project develops a modernized pipeline to detect transcription errors from Rolling Circle Amplification (RCA) sequencing data. Transcription errors occur far less frequently than sequencing errors, making them difficult to identify with standard methods. RCA generates tandem repeats of the same RNA molecule, allowing sequencing noise to be averaged out and the true consensus sequence to be recovered.
 
-The pipeline takes paired-end RCA reads, builds a consensus verified across both R1 and R2, and produces a “double consensus” sequence for mapping. Using kallisto, these sequences are pseudoaligned to a reference, then refined to locate the exact consensus window and its true placement. The final goal is to return precise genomic or transcriptomic positions where transcription errors can be confidently identified. For further explanation, please refer [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main/docs/HOW-IT-WORKS.md).
+The pipeline takes paired-end RCA reads, builds a consensus verified across both R1 and R2, and produces a “double consensus” sequence for mapping. Using kallisto, these sequences are pseudoaligned to a reference, then refined to locate the exact consensus window and its true placement. The final goal is to return precise genomic or transcriptomic positions where transcription errors can be confidently identified. For further explanation, please refer [HOW-IT-WORKS.md](/docs/HOW-IT-WORKS.md).
 
 This repository contains the development implementation of the Transcription (TR) Error Pipeline. Unlike the companion Nextflow repo [(TR-Errors-Pipeline)](https://github.com/desilvsj/TR-Errors-Pipeline), which provides a production-ready workflow, this repo hosts the raw Python scripts, prototypes, and experimental modules. This repository can be used to explore how the core algorithms work, run modules directly, and test out new ideas before integration into the formal pipeline.
 
@@ -29,7 +29,7 @@ Refine Rolling Circle Amplification (RCA) read alignments in **three stages**:
 
 ## How it works
 
-Please see [HOW-IT-WORKS.md](https://github.com/desilvsj/TR-Errors-dev/blob/main/docs/HOW-IT-WORKS.md) for a complete breakdown of the process.
+Please see [HOW-IT-WORKS.md](/docs/HOW-IT-WORKS.md) for a complete breakdown of the process.
 
 ---
 
